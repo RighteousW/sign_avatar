@@ -149,11 +149,9 @@ class LandmarkDataLoader:
             indices = np.linspace(0, len(sequence) - 1, target_length, dtype=int)
             return np.array([sequence[i] for i in indices])
         else:
-            # Pad with last frame or zeros
+            # Pad with zeros
             padded = list(sequence)
-            last_frame = (
-                sequence[-1] if sequence else np.zeros(self.feature_config.feature_size)
-            )
+            last_frame = np.zeros(self.feature_config.feature_size)
             while len(padded) < target_length:
                 padded.append(
                     last_frame.copy()
