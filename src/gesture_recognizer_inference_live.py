@@ -9,9 +9,7 @@ from mediapipe.tasks.python import vision
 import time
 from collections import deque
 import argparse
-from typing import List, Dict, Optional, Tuple
-import threading
-import queue
+from typing import Dict, Tuple
 
 from constants import (
     MODELS_TRAINED_DIR,
@@ -21,27 +19,29 @@ from constants import (
 )
 
 
-# Import the model classes and feature config from the training script
 class FeatureConfig:
-    """Configuration class to control which features to extract and define their dimensions."""
+    """Configuration class to control which features to extract and define their dimensions.
+    Updated for live inference to use only hand and pose landmarks."""
 
     def __init__(
         self,
         use_hand_landmarks: bool = True,
-        use_hand_connections: bool = True,
         use_pose_landmarks: bool = True,
-        use_pose_connections: bool = True,
         max_hands: int = 2,
     ):
         self.use_hand_landmarks = use_hand_landmarks
-        self.use_hand_connections = use_hand_connections
+        # Hand connections are no longer used
+        self.use_hand_connections = False
         self.use_pose_landmarks = use_pose_landmarks
-        self.use_pose_connections = use_pose_connections
+        # Pose connections are no longer used
+        self.use_pose_connections = False
         self.max_hands = max_hands
 
         # Define dimensions for a single hand
-        self.hand_landmarks_dim_per_hand = 21 * 3
-        self.hand_connections_dim_per_hand = 21
+        # 21 landmarks * 3 coords (x, y, z) + 2 new distance features
+        self.hand_landmarks_dim_per_hand = (21 * 3) + 2
+        # Hand connections are removed
+        self.hand_connections_dim_per_hand = 0
 
         # Calculate total hand feature dimensions based on max_hands
         self.hand_landmarks_dim = (
@@ -49,22 +49,17 @@ class FeatureConfig:
             if use_hand_landmarks
             else 0
         )
-        self.hand_connections_dim = (
-            self.hand_connections_dim_per_hand * self.max_hands
-            if use_hand_connections
-            else 0
-        )
+        self.hand_connections_dim = 0
 
         # Pose dimensions
-        self.pose_landmarks_dim = 132 if use_pose_landmarks else 0
-        self.pose_connections_dim = 35 if use_pose_connections else 0
+        # 16 specific landmarks * 4 coordinates (x, y, z, visibility)
+        self.pose_landmarks_dim = 16 * 4 if use_pose_landmarks else 0
+        # Pose connections are removed
+        self.pose_connections_dim = 0
 
         # Calculate the total feature size
         self.feature_size = (
-            self.hand_landmarks_dim
-            + self.hand_connections_dim
-            + self.pose_landmarks_dim
-            + self.pose_connections_dim
+            self.hand_landmarks_dim + self.pose_landmarks_dim
         )
 
 
@@ -123,12 +118,22 @@ class SignLanguageModel(nn.Module):
 
 
 class MediaPipeLandmarkExtractor:
-    """MediaPipe landmark extractor for real-time inference"""
+    """MediaPipe landmark extractor for real-time inference, with an option for async."""
 
-    def __init__(self, hand_model_path, pose_model_path, feature_config):
+    def __init__(self, hand_model_path, pose_model_path, feature_config, async_mode: bool = False):
         self.feature_config = feature_config
+        self.async_mode = async_mode
+        self.pose_landmark_indices = [0, 2, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
 
-        # Initialize hand landmarker for LIVE_STREAM mode
+        # Set up MediaPipe based on the chosen mode
+        if self.async_mode:
+            self._setup_async_mode(hand_model_path, pose_model_path)
+        else:
+            self._setup_sync_mode(hand_model_path, pose_model_path)
+            self.timestamp_ms = 0 # To simulate a timestamp for `detect_for_video`
+
+    def _setup_async_mode(self, hand_model_path, pose_model_path):
+        """Initializes MediaPipe in LIVE_STREAM mode for async processing."""
         hand_options = vision.HandLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=hand_model_path),
             running_mode=vision.RunningMode.LIVE_STREAM,
@@ -140,7 +145,6 @@ class MediaPipeLandmarkExtractor:
         )
         self.hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
-        # Initialize pose landmarker for LIVE_STREAM mode
         pose_options = vision.PoseLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=pose_model_path),
             running_mode=vision.RunningMode.LIVE_STREAM,
@@ -152,187 +156,157 @@ class MediaPipeLandmarkExtractor:
         )
         self.pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
 
-        # Store connection information
-        self.hand_connections = list(mp.solutions.hands.HAND_CONNECTIONS)
-        self.pose_connections = list(mp.solutions.pose.POSE_CONNECTIONS)
-
-        # Results storage
+        # Results storage for async mode
         self.latest_hand_result = None
         self.latest_pose_result = None
         self.timestamp_counter = 0
 
+    def _setup_sync_mode(self, hand_model_path, pose_model_path):
+        """Initializes MediaPipe in VIDEO mode for sync processing."""
+        hand_options = vision.HandLandmarkerOptions(
+            base_options=python.BaseOptions(model_asset_path=hand_model_path),
+            running_mode=vision.RunningMode.VIDEO,
+            num_hands=2,
+            min_hand_detection_confidence=0.5,
+            min_hand_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        self.hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
+
+        pose_options = vision.PoseLandmarkerOptions(
+            base_options=python.BaseOptions(model_asset_path=pose_model_path),
+            running_mode=vision.RunningMode.VIDEO,
+            num_poses=1,
+            min_pose_detection_confidence=0.5,
+            min_pose_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        self.pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
+
     def _hand_result_callback(self, result, output_image, timestamp_ms):
-        """Callback for hand detection results"""
+        """Callback for hand detection results in async mode."""
         self.latest_hand_result = result
 
     def _pose_result_callback(self, result, output_image, timestamp_ms):
-        """Callback for pose detection results"""
+        """Callback for pose detection results in async mode."""
         self.latest_pose_result = result
 
-    def calculate_hand_connections(self, landmarks: np.ndarray) -> np.ndarray:
-        """Calculate connection features from hand landmarks"""
-        if len(landmarks) != 63:  # 21 landmarks * 3 coords
-            return np.zeros(21)
+    def _calculate_distance(self, p1, p2):
+        """Calculates Euclidean distance between two 3D points."""
+        return np.sqrt(np.sum((np.array(p1) - np.array(p2))**2))
 
-        points = landmarks.reshape(21, 3)
-        connections = []
-
-        # Standard MediaPipe connections (20 connections)
-        for connection in self.hand_connections:
-            start_idx, end_idx = connection
-            dist = np.linalg.norm(points[end_idx] - points[start_idx])
-            connections.append(dist)
-
-        # Add an extra feature to match the expected 21 connections
-        extra_connection = np.linalg.norm(points[0] - points[9])
-        connections.append(extra_connection)
-
-        return np.array(connections, dtype=np.float32)
-
-    def calculate_connection_features(self, landmarks, connections):
-        """Calculate connection features (distances between connected landmarks)"""
-        if not landmarks:
-            return []
-
-        connection_features = []
-        for connection in connections:
-            start_idx, end_idx = connection
-            if start_idx < len(landmarks) and end_idx < len(landmarks):
-                start_point = np.array(landmarks[start_idx][:3])  # x, y, z
-                end_point = np.array(landmarks[end_idx][:3])
-                distance = np.linalg.norm(end_point - start_point)
-                connection_features.append(distance)
-            else:
-                connection_features.append(0.0)  # Missing landmark
-
-        return connection_features
 
     def extract_features_from_frame(self, frame_data: Dict) -> np.ndarray:
         """Extract features from a single frame based on configuration"""
         features = []
 
-        # Hand features
+        # Hand landmarks
         for hand_idx in range(self.feature_config.max_hands):
-            # Hand landmarks
-            if self.feature_config.use_hand_landmarks:
-                hand_features = np.zeros(
-                    self.feature_config.hand_landmarks_dim_per_hand
-                )
-                if (
-                    frame_data.get("hands")
-                    and hand_idx < len(frame_data["hands"])
-                    and frame_data["hands"][hand_idx]
-                ):
-                    hand_data = frame_data["hands"][hand_idx]
-                    landmarks = hand_data.get("landmarks", [])
-                    if isinstance(landmarks, list) and len(landmarks) >= 21:
-                        flat_landmarks = np.array(landmarks[:21]).flatten()
-                        hand_features[
-                            : min(len(flat_landmarks), len(hand_features))
-                        ] = flat_landmarks[: len(hand_features)]
-                features.extend(hand_features)
+            hand_features = np.zeros(self.feature_config.hand_landmarks_dim_per_hand)
+            if (
+                frame_data.get("hands")
+                and hand_idx < len(frame_data["hands"])
+                and frame_data["hands"][hand_idx]
+            ):
+                hand_data = frame_data["hands"][hand_idx]
+                landmarks = hand_data.get("landmarks", [])
 
-            # Hand connections
-            if self.feature_config.use_hand_connections:
-                hand_conn_features = np.zeros(
-                    self.feature_config.hand_connections_dim_per_hand
-                )
-                if (
-                    frame_data.get("connection_features", {}).get("hands")
-                    and hand_idx < len(frame_data["connection_features"]["hands"])
-                    and frame_data["connection_features"]["hands"][hand_idx]
-                ):
-                    conn_feats = frame_data["connection_features"]["hands"][hand_idx]
-                    hand_conn_features[
-                        : min(len(conn_feats), len(hand_conn_features))
-                    ] = conn_feats[: len(hand_conn_features)]
-                features.extend(hand_conn_features)
+                if self.feature_config.use_hand_landmarks and isinstance(landmarks, list) and len(landmarks) >= 21:
+                    # Flatten the coordinates of all 21 landmarks
+                    flat_landmarks = np.array(landmarks[:21])[:, :3].flatten()
+                    hand_features[:len(flat_landmarks)] = flat_landmarks
+
+                    # Calculate new distance features and append
+                    thumb_tip = landmarks[4]
+                    ring_joint = landmarks[15]
+                    index_tip = landmarks[8]
+                    middle_tip = landmarks[12]
+
+                    dist_thumb_ring = self._calculate_distance(thumb_tip, ring_joint)
+                    dist_index_middle = self._calculate_distance(index_tip, middle_tip)
+
+                    hand_features[len(flat_landmarks)] = dist_thumb_ring
+                    hand_features[len(flat_landmarks) + 1] = dist_index_middle
+            features.extend(hand_features)
 
         # Pose landmarks
         if self.feature_config.use_pose_landmarks:
             pose_features = np.zeros(self.feature_config.pose_landmarks_dim)
             if frame_data.get("pose") and "landmarks" in frame_data["pose"]:
-                pose_landmarks = np.array(frame_data["pose"]["landmarks"]).flatten()
-                pose_features[: min(len(pose_landmarks), len(pose_features))] = (
-                    pose_landmarks[: len(pose_features)]
+                all_pose_landmarks = frame_data["pose"]["landmarks"]
+                
+                # Filter for the specific pose landmarks
+                selected_landmarks = []
+                for idx in self.pose_landmark_indices:
+                    if idx < len(all_pose_landmarks):
+                        selected_landmarks.append(all_pose_landmarks[idx])
+                
+                flat_pose_landmarks = np.array(selected_landmarks).flatten()
+                
+                pose_features[: min(len(flat_pose_landmarks), len(pose_features))] = (
+                    flat_pose_landmarks[: len(pose_features)]
                 )
             features.extend(pose_features)
 
-        # Pose connections
-        if self.feature_config.use_pose_connections:
-            pose_conn_features = np.zeros(self.feature_config.pose_connections_dim)
-            if frame_data.get("connection_features", {}).get("pose"):
-                conn_feats = frame_data["connection_features"]["pose"]
-                pose_conn_features[: min(len(conn_feats), len(pose_conn_features))] = (
-                    conn_feats[: len(pose_conn_features)]
-                )
-            features.extend(pose_conn_features)
-
         return np.array(features, dtype=np.float32)
 
-    def process_frame(self, frame):
+    def process_frame(self, frame) -> Tuple[np.ndarray, Dict]:
         """Process a single frame and extract landmark features"""
-        # Convert to RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        
+        hand_result = None
+        pose_result = None
 
-        # Process with MediaPipe (async)
-        timestamp_ms = self.timestamp_counter
-        self.timestamp_counter += 1
+        if self.async_mode:
+            timestamp_ms = self.timestamp_counter
+            self.timestamp_counter += 1
+            
+            # Submit to MediaPipe processors
+            self.hand_landmarker.detect_async(mp_image, timestamp_ms)
+            self.pose_landmarker.detect_async(mp_image, timestamp_ms)
 
-        # Submit to MediaPipe processors
-        self.hand_landmarker.detect_async(mp_image, timestamp_ms)
-        self.pose_landmarker.detect_async(mp_image, timestamp_ms)
+            # Small delay to allow processing
+            time.sleep(0.001)
 
-        # Small delay to allow processing
-        time.sleep(0.001)
+            # Use the latest results from the callbacks
+            hand_result = self.latest_hand_result
+            pose_result = self.latest_pose_result
+
+        else: # Synchronous mode
+            hand_result = self.hand_landmarker.detect_for_video(mp_image, self.timestamp_ms)
+            pose_result = self.pose_landmarker.detect_for_video(mp_image, self.timestamp_ms)
+            self.timestamp_ms += 1
 
         frame_data = {
             "hands": [],
             "pose": None,
-            "connection_features": {"hands": [], "pose": []},
         }
 
         # Process hand results
-        if self.latest_hand_result and self.latest_hand_result.hand_landmarks:
-            for i, hand_landmarks in enumerate(self.latest_hand_result.hand_landmarks):
+        if hand_result and hand_result.hand_landmarks:
+            for i, hand_landmarks in enumerate(hand_result.hand_landmarks):
                 landmarks = [[lm.x, lm.y, lm.z] for lm in hand_landmarks]
-
-                # Calculate hand connection features
-                hand_connections = self.calculate_connection_features(
-                    landmarks, self.hand_connections
-                )
-
                 hand_data = {
                     "hand_index": i,
                     "handedness": (
-                        self.latest_hand_result.handedness[i][0].category_name
-                        if self.latest_hand_result.handedness
+                        hand_result.handedness[i][0].category_name
+                        if hand_result.handedness
                         else "Unknown"
                     ),
                     "landmarks": landmarks,
-                    "connection_features": hand_connections,
                 }
                 frame_data["hands"].append(hand_data)
-                frame_data["connection_features"]["hands"].append(hand_connections)
 
         # Process pose results
-        if self.latest_pose_result and self.latest_pose_result.pose_landmarks:
-            pose_landmarks = self.latest_pose_result.pose_landmarks[0]
+        if pose_result and pose_result.pose_landmarks:
+            pose_landmarks = pose_result.pose_landmarks[0]
             landmarks = []
             for lm in pose_landmarks:
                 landmarks.append([lm.x, lm.y, lm.z, getattr(lm, "visibility", None)])
 
-            # Calculate pose connection features
-            pose_connections = self.calculate_connection_features(
-                landmarks, self.pose_connections
-            )
-
             frame_data["pose"] = {
                 "landmarks": landmarks,
-                "connection_features": pose_connections,
             }
-            frame_data["connection_features"]["pose"] = pose_connections
 
         # Extract features
         features = self.extract_features_from_frame(frame_data)
@@ -343,7 +317,7 @@ class InferenceSystem:
     """Real-time sign language inference system"""
 
     def __init__(
-        self, model_dir, hand_model_path, pose_model_path, confidence_threshold=0.8
+        self, model_dir, hand_model_path, pose_model_path, confidence_threshold=0.8, async_mode: bool = False
     ):
         self.model_dir = model_dir
         self.confidence_threshold = confidence_threshold
@@ -354,7 +328,12 @@ class InferenceSystem:
 
         # Create feature config
         feature_config_data = self.model_info["feature_config"]
-        self.feature_config = FeatureConfig(**feature_config_data)
+        # Only use necessary parameters
+        self.feature_config = FeatureConfig(
+            use_hand_landmarks=feature_config_data.get("use_hand_landmarks", True),
+            use_pose_landmarks=feature_config_data.get("use_pose_landmarks", True),
+            max_hands=feature_config_data.get("max_hands", 2),
+        )
 
         # Load model
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -375,7 +354,7 @@ class InferenceSystem:
 
         # Initialize landmark extractor
         self.landmark_extractor = MediaPipeLandmarkExtractor(
-            hand_model_path, pose_model_path, self.feature_config
+            hand_model_path, pose_model_path, self.feature_config, async_mode
         )
 
         # Sequence management
@@ -458,25 +437,32 @@ class InferenceSystem:
         if frame_data.get("pose"):
             landmarks = frame_data["pose"]["landmarks"]
             h, w = frame.shape[:2]
+            
+            # Use the same pose landmark indices to draw
+            pose_indices_to_draw = self.landmark_extractor.pose_landmark_indices
 
             # Draw landmarks
-            for landmark in landmarks:
-                x, y = int(landmark[0] * w), int(landmark[1] * h)
-                cv2.circle(annotated_frame, (x, y), 2, (0, 0, 255), -1)
+            for idx in pose_indices_to_draw:
+                if idx < len(landmarks):
+                    landmark = landmarks[idx]
+                    x, y = int(landmark[0] * w), int(landmark[1] * h)
+                    cv2.circle(annotated_frame, (x, y), 2, (0, 0, 255), -1)
 
             # Draw connections
             for connection in mp.solutions.pose.POSE_CONNECTIONS:
                 start_idx, end_idx = connection
-                if start_idx < len(landmarks) and end_idx < len(landmarks):
-                    start_point = (
-                        int(landmarks[start_idx][0] * w),
-                        int(landmarks[start_idx][1] * h),
-                    )
-                    end_point = (
-                        int(landmarks[end_idx][0] * w),
-                        int(landmarks[end_idx][1] * h),
-                    )
-                    cv2.line(annotated_frame, start_point, end_point, (255, 255, 0), 1)
+                # Only draw if both points are in the selected subset
+                if start_idx in pose_indices_to_draw and end_idx in pose_indices_to_draw:
+                    if start_idx < len(landmarks) and end_idx < len(landmarks):
+                        start_point = (
+                            int(landmarks[start_idx][0] * w),
+                            int(landmarks[start_idx][1] * h),
+                        )
+                        end_point = (
+                            int(landmarks[end_idx][0] * w),
+                            int(landmarks[end_idx][1] * h),
+                        )
+                        cv2.line(annotated_frame, start_point, end_point, (255, 255, 0), 1)
 
         return annotated_frame
 
@@ -750,6 +736,7 @@ class InferenceSystem:
         print("Starting inference system...")
         print(f"Model loaded: {len(self.model_info['class_names'])} classes")
         print(f"Confidence threshold: {self.confidence_threshold}")
+        print(f"MediaPipe mode: {'Async' if self.landmark_extractor.async_mode else 'Sync'}")
         print("Press 'q' to quit, 'l' to toggle landmarks, 'p' to pause")
 
         while True:
@@ -884,6 +871,12 @@ def main():
         default=DEFAULT_SEQUENCE_LENGTH,
         help="Override sequence length from model",
     )
+    parser.add_argument(
+        "--async_mediapipe",
+        default=False,
+        help="Use MediaPipe's asynchronous live stream mode",
+    )
+
 
     args = parser.parse_args()
 
@@ -915,6 +908,7 @@ def main():
             hand_model_path=args.hand_model,
             pose_model_path=args.pose_model,
             confidence_threshold=args.confidence_threshold,
+            async_mode=args.async_mediapipe,
         )
 
         # Override sequence length if specified

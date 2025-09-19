@@ -32,25 +32,28 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureConfig:
-    """Configuration class to control which features to extract and define their dimensions."""
+    """Configuration class to control which features to extract and define their dimensions.
+    Updated to use only hand and pose landmarks."""
 
     def __init__(
         self,
         use_hand_landmarks: bool = True,
-        use_hand_connections: bool = True,
         use_pose_landmarks: bool = True,
-        use_pose_connections: bool = True,
         max_hands: int = 2,
     ):
         self.use_hand_landmarks = use_hand_landmarks
-        self.use_hand_connections = use_hand_connections
+        # Set hand connections to False as they are no longer used
+        self.use_hand_connections = False
         self.use_pose_landmarks = use_pose_landmarks
-        self.use_pose_connections = use_pose_connections
+        # Set pose connections to False as they are no longer used
+        self.use_pose_connections = False
         self.max_hands = max_hands
 
         # Define dimensions for a single hand
-        self.hand_landmarks_dim_per_hand = 21 * 3
-        self.hand_connections_dim_per_hand = 21
+        # 21 landmarks * 3 coords (x, y, z) + 2 new distance features
+        self.hand_landmarks_dim_per_hand = (21 * 3) + 2
+        # Hand connections are removed
+        self.hand_connections_dim_per_hand = 0
 
         # Calculate total hand feature dimensions based on max_hands
         self.hand_landmarks_dim = (
@@ -58,34 +61,23 @@ class FeatureConfig:
             if use_hand_landmarks
             else 0
         )
-        self.hand_connections_dim = (
-            self.hand_connections_dim_per_hand * self.max_hands
-            if use_hand_connections
-            else 0
-        )
+        self.hand_connections_dim = 0
 
         # Pose dimensions
-        self.pose_landmarks_dim = 132 if use_pose_landmarks else 0
-        self.pose_connections_dim = 35 if use_pose_connections else 0
+        # 16 specific landmarks * 4 coordinates (x, y, z, visibility)
+        self.pose_landmarks_dim = 16 * 4 if use_pose_landmarks else 0
+        # Pose connections are removed
+        self.pose_connections_dim = 0
 
         # Calculate the total feature size
-        self.feature_size = (
-            self.hand_landmarks_dim
-            + self.hand_connections_dim
-            + self.pose_landmarks_dim
-            + self.pose_connections_dim
-        )
+        self.feature_size = self.hand_landmarks_dim + self.pose_landmarks_dim
 
     def __str__(self):
         features = []
         if self.use_hand_landmarks:
             features.append(f"hand_landmarks({self.hand_landmarks_dim})")
-        if self.use_hand_connections:
-            features.append(f"hand_connections({self.hand_connections_dim})")
         if self.use_pose_landmarks:
             features.append(f"pose_landmarks({self.pose_landmarks_dim})")
-        if self.use_pose_connections:
-            features.append(f"pose_connections({self.pose_connections_dim})")
         return f"FeatureConfig(total={self.feature_size}): {', '.join(features)}"
 
 
@@ -104,41 +96,124 @@ class SignLanguageDataset(Dataset):
 
 
 class LandmarkDataLoader:
-    """Enhanced data loader with configurable feature extraction"""
+    """Enhanced data loader with configurable feature extraction.
+    Updated to remove connection feature logic."""
 
     def __init__(self, landmarks_dir: str, feature_config: FeatureConfig):
         self.landmarks_dir = landmarks_dir
         self.feature_config = feature_config
+        self.pose_landmark_indices = [
+            0,
+            2,
+            5,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+        ]
+        self.pose_landmark_indices = [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+        ]
+        self.pose_landmark_indices = [
+            0,
+            2,
+            5,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+        ]
+        # These are the specific indices requested by the user
+        self.pose_landmark_indices = [
+            0,
+            2,
+            5,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+        ]
 
-    def calculate_hand_connections(self, landmarks: np.ndarray) -> np.ndarray:
-        """Calculate connection features from hand landmarks (21 landmarks * 3 coords)"""
-        # This function needs to be a robust version of your original logic that
-        # consistently returns 21 connection features. The original implementation was flawed.
-
-        # We can implement a simple version here for demonstration,
-        # but the core idea is to produce 21 values from 21 landmarks.
-        # This version uses standard MediaPipe connections but adds an extra feature
-        # to match the 21-feature count.
-
-        if len(landmarks) != 63:  # 21 landmarks * 3 coords
-            return np.zeros(21)
-
-        points = landmarks.reshape(21, 3)
-        connections = []
-
-        # Standard MediaPipe connections (20 connections)
-        mp_hand_connections = list(mp.solutions.hands.HAND_CONNECTIONS)
-        for connection in mp_hand_connections:
-            start_idx, end_idx = connection
-            dist = np.linalg.norm(points[end_idx] - points[start_idx])
-            connections.append(dist)
-
-        # Add an extra feature to match the expected 21 connections
-        # A simple example is the distance from the wrist to the middle finger knuckle
-        extra_connection = np.linalg.norm(points[0] - points[9])
-        connections.append(extra_connection)
-
-        return np.array(connections, dtype=np.float32)
+    def _calculate_distance(self, p1, p2):
+        """Calculates Euclidean distance between two 3D points."""
+        return np.sqrt(np.sum((np.array(p1) - np.array(p2)) ** 2))
 
     def pad_or_truncate_sequence(
         self, sequence: List, target_length: int
@@ -164,62 +239,57 @@ class LandmarkDataLoader:
         """Extract features from a single frame based on configuration"""
         features = []
 
-        # Hand features
+        # Hand landmarks
         for hand_idx in range(self.feature_config.max_hands):
-            # Hand landmarks
-            if self.feature_config.use_hand_landmarks:
-                hand_features = np.zeros(
-                    self.feature_config.hand_landmarks_dim_per_hand
-                )
-                if (
-                    frame_data.get("hands")
-                    and hand_idx < len(frame_data["hands"])
-                    and frame_data["hands"][hand_idx]
-                ):
-                    hand_data = frame_data["hands"][hand_idx]
-                    landmarks = hand_data.get("landmarks", [])
-                    if isinstance(landmarks, list) and len(landmarks) >= 21:
-                        flat_landmarks = np.array(landmarks[:21]).flatten()
-                        hand_features[
-                            : min(len(flat_landmarks), len(hand_features))
-                        ] = flat_landmarks[: len(hand_features)]
-                features.extend(hand_features)
+            hand_features = np.zeros(self.feature_config.hand_landmarks_dim_per_hand)
+            if (
+                frame_data.get("hands")
+                and hand_idx < len(frame_data["hands"])
+                and frame_data["hands"][hand_idx]
+            ):
+                hand_data = frame_data["hands"][hand_idx]
+                landmarks = hand_data.get("landmarks", [])
 
-            # Hand connections
-            if self.feature_config.use_hand_connections:
-                hand_conn_features = np.zeros(
-                    self.feature_config.hand_connections_dim_per_hand
-                )
                 if (
-                    frame_data.get("connection_features", {}).get("hands")
-                    and hand_idx < len(frame_data["connection_features"]["hands"])
-                    and frame_data["connection_features"]["hands"][hand_idx]
+                    self.feature_config.use_hand_landmarks
+                    and isinstance(landmarks, list)
+                    and len(landmarks) >= 21
                 ):
-                    conn_feats = frame_data["connection_features"]["hands"][hand_idx]
-                    hand_conn_features[
-                        : min(len(conn_feats), len(hand_conn_features))
-                    ] = conn_feats[: len(hand_conn_features)]
-                features.extend(hand_conn_features)
+                    # Flatten the coordinates of all 21 landmarks
+                    flat_landmarks = np.array(landmarks[:21])[:, :3].flatten()
+                    hand_features[: len(flat_landmarks)] = flat_landmarks
+
+                    # Calculate new distance features and append
+                    thumb_tip = landmarks[4]
+                    ring_joint = landmarks[15]
+                    index_tip = landmarks[8]
+                    middle_tip = landmarks[12]
+
+                    dist_thumb_ring = self._calculate_distance(thumb_tip, ring_joint)
+                    dist_index_middle = self._calculate_distance(index_tip, middle_tip)
+
+                    hand_features[len(flat_landmarks)] = dist_thumb_ring
+                    hand_features[len(flat_landmarks) + 1] = dist_index_middle
+            features.extend(hand_features)
 
         # Pose landmarks
         if self.feature_config.use_pose_landmarks:
             pose_features = np.zeros(self.feature_config.pose_landmarks_dim)
             if frame_data.get("pose") and "landmarks" in frame_data["pose"]:
-                pose_landmarks = np.array(frame_data["pose"]["landmarks"]).flatten()
-                pose_features[: min(len(pose_landmarks), len(pose_features))] = (
-                    pose_landmarks[: len(pose_features)]
+                all_pose_landmarks = frame_data["pose"]["landmarks"]
+
+                # Filter for the specific pose landmarks
+                selected_landmarks = []
+                for idx in self.pose_landmark_indices:
+                    if idx < len(all_pose_landmarks):
+                        selected_landmarks.append(all_pose_landmarks[idx])
+
+                flat_pose_landmarks = np.array(selected_landmarks).flatten()
+
+                pose_features[: min(len(flat_pose_landmarks), len(pose_features))] = (
+                    flat_pose_landmarks[: len(pose_features)]
                 )
             features.extend(pose_features)
-
-        # Pose connections
-        if self.feature_config.use_pose_connections:
-            pose_conn_features = np.zeros(self.feature_config.pose_connections_dim)
-            if frame_data.get("connection_features", {}).get("pose"):
-                conn_feats = frame_data["connection_features"]["pose"]
-                pose_conn_features[: min(len(conn_feats), len(pose_conn_features))] = (
-                    conn_feats[: len(pose_conn_features)]
-                )
-            features.extend(pose_conn_features)
 
         return np.array(features, dtype=np.float32)
 
@@ -280,7 +350,7 @@ class LandmarkDataLoader:
 
 
 class SignLanguageModel(nn.Module):
-    """Improved model architecture from the second script"""
+    """Sign language model architecture using a Conv1D model."""
 
     def __init__(
         self,
@@ -584,31 +654,17 @@ def main():
         "--dropout", type=float, default=DEFAULT_DROPOUT, help="Dropout rate"
     )
 
-    # Feature selection arguments
-    parser.add_argument(
-        "--no_hand_landmarks", action="store_true", help="Disable hand landmarks"
-    )
-    parser.add_argument(
-        "--no_hand_connections", action="store_true", help="Disable hand connections"
-    )
-    parser.add_argument(
-        "--no_pose_landmarks", action="store_true", help="Disable pose landmarks"
-    )
-    parser.add_argument(
-        "--no_pose_connections", action="store_true", help="Disable pose connections"
-    )
+    # Feature selection arguments - simplified
     parser.add_argument(
         "--max_hands", type=int, default=2, help="Maximum number of hands to track"
     )
 
     args = parser.parse_args()
 
-    # Create feature configuration
+    # Create feature configuration - only hand and pose landmarks
     feature_config = FeatureConfig(
-        use_hand_landmarks=not args.no_hand_landmarks,
-        use_hand_connections=not args.no_hand_connections,
-        use_pose_landmarks=not args.no_pose_landmarks,
-        use_pose_connections=not args.no_pose_connections,
+        use_hand_landmarks=True,
+        use_pose_landmarks=True,
         max_hands=args.max_hands,
     )
 
