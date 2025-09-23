@@ -42,18 +42,12 @@ class FeatureConfig:
         max_hands: int = 2,
     ):
         self.use_hand_landmarks = use_hand_landmarks
-        # Set hand connections to False as they are no longer used
-        self.use_hand_connections = False
         self.use_pose_landmarks = use_pose_landmarks
-        # Set pose connections to False as they are no longer used
-        self.use_pose_connections = False
         self.max_hands = max_hands
 
         # Define dimensions for a single hand
         # 21 landmarks * 3 coords (x, y, z) + 2 new distance features
         self.hand_landmarks_dim_per_hand = (21 * 3) + 2
-        # Hand connections are removed
-        self.hand_connections_dim_per_hand = 0
 
         # Calculate total hand feature dimensions based on max_hands
         self.hand_landmarks_dim = (
@@ -61,13 +55,10 @@ class FeatureConfig:
             if use_hand_landmarks
             else 0
         )
-        self.hand_connections_dim = 0
 
         # Pose dimensions
         # 16 specific landmarks * 4 coordinates (x, y, z, visibility)
         self.pose_landmarks_dim = 16 * 4 if use_pose_landmarks else 0
-        # Pose connections are removed
-        self.pose_connections_dim = 0
 
         # Calculate the total feature size
         self.feature_size = self.hand_landmarks_dim + self.pose_landmarks_dim
@@ -96,96 +87,11 @@ class SignLanguageDataset(Dataset):
 
 
 class LandmarkDataLoader:
-    """Enhanced data loader with configurable feature extraction.
-    Updated to remove connection feature logic."""
+    """Enhanced data loader with configurable feature extraction."""
 
     def __init__(self, landmarks_dir: str, feature_config: FeatureConfig):
         self.landmarks_dir = landmarks_dir
         self.feature_config = feature_config
-        self.pose_landmark_indices = [
-            0,
-            2,
-            5,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            23,
-            24,
-            25,
-            26,
-            27,
-            28,
-            29,
-            30,
-            31,
-            32,
-        ]
-        self.pose_landmark_indices = [
-            0,
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17,
-            18,
-            19,
-            20,
-            21,
-            22,
-            23,
-            24,
-            25,
-            26,
-            27,
-            28,
-            29,
-            30,
-            31,
-            32,
-        ]
-        self.pose_landmark_indices = [
-            0,
-            2,
-            5,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            23,
-            24,
-            25,
-            26,
-            27,
-            28,
-            29,
-            30,
-            31,
-            32,
-        ]
-        # These are the specific indices requested by the user
         self.pose_landmark_indices = [
             0,
             2,
@@ -737,9 +643,7 @@ def main():
         "feature_size": feature_config.feature_size,
         "feature_config": {
             "use_hand_landmarks": feature_config.use_hand_landmarks,
-            "use_hand_connections": feature_config.use_hand_connections,
             "use_pose_landmarks": feature_config.use_pose_landmarks,
-            "use_pose_connections": feature_config.use_pose_connections,
             "max_hands": feature_config.max_hands,
         },
         "hidden_size": args.hidden_size,

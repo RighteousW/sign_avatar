@@ -3,6 +3,7 @@ import cv2
 import torch
 import pickle
 import numpy as np
+import torch.nn as nn
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -61,9 +62,6 @@ class FeatureConfig:
         self.feature_size = (
             self.hand_landmarks_dim + self.pose_landmarks_dim
         )
-
-
-import torch.nn as nn
 
 
 class SignLanguageModel(nn.Module):

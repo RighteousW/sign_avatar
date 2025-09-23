@@ -8,7 +8,7 @@ import tkinter as tk
 from constants import LANDMARKS_DIR
 
 
-class InteractiveLandmarkVisualizer:
+class LandmarkVisualizer:
     def __init__(self):
         """
         Initialize the interactive landmark visualizer
@@ -471,7 +471,7 @@ class InteractiveLandmarkVisualizer:
 
 def main():
     print("Starting Interactive Landmark Visualizer...")
-    visualizer = InteractiveLandmarkVisualizer()
+    visualizer = LandmarkVisualizer()
     visualizer.run()
 
 

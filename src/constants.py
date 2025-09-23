@@ -1,6 +1,7 @@
 # File paths
 DATA_DIR = "./data"
 VIDEOS_DIR = DATA_DIR + "/videos"
+OUTPUT_DIR = "./output"
 LANDMARKS_DIR = DATA_DIR + "/landmarks"
 PROCESSED_GESTURE_DATA_PATH = DATA_DIR + "/processed_gesture_data.pkl"
 
@@ -14,32 +15,38 @@ MEDIAPIPE_POSE_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR + "/pose_landmarker_lite.
 # Gesture recognizer model hyperparameters
 DEFAULT_SEQUENCE_LENGTH = 30
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_LEARNING_RATE = 0.0001
+DEFAULT_LEARNING_RATE = 0.001
 DEFAULT_HIDDEN_SIZE = 124
-DEFAULT_DROPOUT = 0.3
+DEFAULT_DROPOUT = 0.5
 DEFAULT_EPOCHS = 30
 
 # Seq2Seq model hyperparameters
 SEQ2SEQ_CONFIG = {
-    "learning_rate": 1e-3,
-    "weight_decay": 1e-4,
+    # Training hyperparameters
+    "epochs": 50,
     "batch_size": 32,
-    "hidden_dim": 64,
+    # Architecture hyperparameters
+    "hidden_dim": 128,
     "num_layers": 2,
-    "use_transformer": True,
-    "dropout": 0.1,
-    "mse_weight": 1.0,
-    "smoothness_weight": 0.3,
-    "endpoint_weight": 2.0,
-    "teacher_forcing_ratio": 0.5,
-    "grad_clip": 1.0,
-    "log_every": 100,
-    "vis_every": 10,
-    "early_stopping": True,
-    "patience": 20,
-    "epochs": 30,
+    "noise_dim": 100,
+    "dropout": 0.3,
+    # GAN training hyperparameters
+    "generator_lr": 0.0003,
+    "discriminator_lr": 0.00008,
+    "weight_decay": 1e-5,
+    "beta1": 0.5,
+    "beta2": 0.999,
+    # Training strategy
+    "label_smoothing": 0.3,
+    "generator_steps": 3,
+    "discriminator_steps": 1,
+    # Dataset parameters
+    "gap_size": 5,
+    "max_samples": 5000,
+    "cache_size": 50,
+    # Logging
+    "log_every": 5,
 }
-
 
 # Video Recording settings
 FRAME_RATE = 30
