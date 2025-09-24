@@ -129,14 +129,13 @@ class LandmarkDataLoader:
                         )
                         frame_features.append(features)
 
-                    if len(frame_features) >= 5:
-                        padded_sequence = self.pad_or_truncate_sequence(
-                            frame_features,
-                            sequence_length,
-                            self.feature_info["total_features"],
-                        )
-                        all_sequences.append(padded_sequence)
-                        all_labels.append(len(class_names) - 1)
+                    padded_sequence = self.pad_or_truncate_sequence(
+                        frame_features,
+                        sequence_length,
+                        self.feature_info["total_features"],
+                    )
+                    all_sequences.append(padded_sequence)
+                    all_labels.append(len(class_names) - 1)
 
                 except Exception as e:
                     print(f"Error loading {pickle_path}: {e}")
