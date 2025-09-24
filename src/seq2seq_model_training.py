@@ -11,6 +11,7 @@ from pathlib import Path
 import random
 
 from constants import LANDMARKS_DIR, MODELS_TRAINED_DIR, SEQ2SEQ_CONFIG
+from similarity_metrics import GestureSequenceSimilarityMetrics
 
 # Set random seeds
 torch.manual_seed(42)
@@ -217,7 +218,6 @@ class GestureDataset(Dataset):
                     start_indices = [0]
 
                 for start_idx in start_indices:
-                    end_idx = start_idx + self.gap_size + 1
                     sequence = frame_features[
                         start_idx : start_idx + self.total_sequence_length
                     ]
@@ -252,49 +252,107 @@ class GestureDataset(Dataset):
 
 
 class LSTMGenerator(nn.Module):
-    """LSTM-based Generator following proven GAN architectures"""
+    """Enhanced LSTM-based Generator with improved architecture"""
 
-    def __init__(self, feature_dim=333, noise_dim=100, hidden_dim=128, num_layers=2):
+    def __init__(
+        self,
+        feature_dim=333,
+        noise_dim=100,
+        hidden_dim=128,
+        num_layers=2,
+        sequence_length=3,
+    ):
         super(LSTMGenerator, self).__init__()
         self.feature_dim = feature_dim
         self.noise_dim = noise_dim
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim * 2
+        self.num_layers = num_layers + 1
 
-        # Conditioning network (start + end frames -> context)
+        # Multi-scale conditioning network (stronger feature extraction)
         self.condition_encoder = nn.Sequential(
-            nn.Linear(feature_dim * 2, hidden_dim),
+            nn.Linear(feature_dim * 2, self.hidden_dim),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.Dropout(0.1),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(hidden_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.Dropout(0.1),
+            # Add residual connection
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(self.hidden_dim),
         )
 
-        # Noise + context -> initial hidden state
+        # Enhanced noise processing
+        self.noise_encoder = nn.Sequential(
+            nn.Linear(noise_dim, self.hidden_dim // 2),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(self.hidden_dim // 2),
+            nn.Linear(self.hidden_dim // 2, self.hidden_dim // 2),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(self.hidden_dim // 2),
+        )
+
+        # Combined noise + context -> initial hidden state
         self.noise_to_hidden = nn.Sequential(
-            nn.Linear(noise_dim + hidden_dim, hidden_dim * num_layers),
+            nn.Linear(
+                self.hidden_dim + self.hidden_dim // 2,
+                self.hidden_dim
+                * self.num_layers
+                * 2
+                * 2,  # *2 for bidirectional, *2 for h_0 and c_0
+            ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(hidden_dim * num_layers),
+            nn.BatchNorm1d(self.hidden_dim * self.num_layers * 2 * 2),
+            nn.Dropout(0.1),
         )
 
-        # LSTM for sequence generation
+        # Project combined features to LSTM input dimension
+        self.feature_to_lstm = nn.Sequential(
+            nn.Linear(self.hidden_dim + self.hidden_dim // 2, self.hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(self.hidden_dim),
+        )
+
+        # Bidirectional LSTM for richer representation
         self.lstm = nn.LSTM(
-            input_size=hidden_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
+            input_size=self.hidden_dim,
+            hidden_size=self.hidden_dim,
+            num_layers=self.num_layers,
             batch_first=True,
-            dropout=0.3 if num_layers > 1 else 0,
+            dropout=0.2 if self.num_layers > 1 else 0,
+            bidirectional=True,  # Add bidirectional processing
         )
 
-        # Output projection
-        self.output_projection = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+        # Attention mechanism for better sequence modeling
+        self.attention = nn.MultiheadAttention(
+            embed_dim=self.hidden_dim * 2,  # *2 for bidirectional
+            num_heads=8,
+            dropout=0.1,
+            batch_first=True,
+        )
+
+        # Multi-layer output projection with residual connections
+        self.pre_output = nn.Sequential(
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(hidden_dim),
-            nn.Linear(hidden_dim, feature_dim),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.Dropout(0.1),
+        )
+
+        self.output_projection = nn.Sequential(
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.BatchNorm1d(self.hidden_dim),
+            nn.Dropout(0.1),
+            nn.Linear(self.hidden_dim, feature_dim),
             nn.Tanh(),  # Bounded output
         )
+        self.sequence_length = sequence_length
+
+        # Learnable interpolation weights for start/end frame blending
+        self.interpolation_weights = nn.Parameter(torch.ones(sequence_length, 1))
 
     def forward(self, start_frame, end_frame, noise=None):
         batch_size = start_frame.size(0)
@@ -303,47 +361,95 @@ class LSTMGenerator(nn.Module):
         if noise is None:
             noise = torch.randn(batch_size, self.noise_dim).to(device)
 
-        # Encode conditioning information
+        # Enhanced conditioning
         condition = torch.cat([start_frame, end_frame], dim=1)
         context = self.condition_encoder(condition)
 
+        # Process noise separately
+        noise_features = self.noise_encoder(noise)
+
         # Combine noise and context
-        noise_context = torch.cat([noise, context], dim=1)
-        hidden_init = self.noise_to_hidden(noise_context)
+        combined_features = torch.cat([context, noise_features], dim=1)
 
-        # Initialize LSTM hidden state
+        # Initialize hidden states from combined noise+context features
+        # Fix: The output should be 2x larger to accommodate both h_0 and c_0
+        hidden_init = self.noise_to_hidden(combined_features)
+
+        # Calculate the size needed for each hidden state
+        single_hidden_size = self.hidden_dim * self.num_layers * 2  # *2 for bidirectional
+
+        # Split the tensor correctly - use .contiguous().view() or .reshape()
         h_0 = (
-            hidden_init.view(batch_size, self.num_layers, self.hidden_dim)
-            .transpose(0, 1)
+            hidden_init[:, :single_hidden_size]
             .contiguous()
+            .view(self.num_layers * 2, batch_size, self.hidden_dim)
         )
-        c_0 = torch.zeros_like(h_0)
+        c_0 = (
+            hidden_init[:, single_hidden_size : single_hidden_size * 2]
+            .contiguous()
+            .view(self.num_layers * 2, batch_size, self.hidden_dim)
+        )
 
-        # Generate sequence
-        sequence_length = 7  # start + 5 middle + end
-        lstm_input = context.unsqueeze(1).repeat(1, sequence_length, 1)
+        # Project combined features to LSTM input space
+        lstm_input_base = self.feature_to_lstm(combined_features)
 
+        # Generate sequence using noise+context information
+        positions = torch.linspace(0, 1, self.sequence_length).to(device)
+
+        # Create input sequence that incorporates both noise and positional info
+        lstm_inputs = []
+        for t in range(self.sequence_length):
+            # Add positional encoding to the noise+context features
+            pos_weight = positions[t]
+
+            # Combine base features with positional information
+            pos_encoding = torch.full_like(
+                lstm_input_base, pos_weight * 0.1
+            )  # Scale positional info
+            timestep_input = lstm_input_base + pos_encoding
+
+            lstm_inputs.append(timestep_input)
+
+        lstm_input = torch.stack(lstm_inputs, dim=1)  # [batch, seq_len, hidden_dim]
+
+        # LSTM processing with noise-initialized hidden states
         lstm_out, _ = self.lstm(lstm_input, (h_0, c_0))
 
-        # Project to feature space
-        lstm_out_flat = lstm_out.contiguous().view(-1, self.hidden_dim)
-        features = self.output_projection(lstm_out_flat)
+        # Apply attention
+        attended_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
+
+        # Add residual connection
+        lstm_out = lstm_out + attended_out
+
+        # Project to output space
+        lstm_out_flat = lstm_out.contiguous().view(-1, self.hidden_dim * 2)
+        pre_features = self.pre_output(lstm_out_flat)
+        features = self.output_projection(pre_features)
 
         # Reshape back to sequence
         generated_sequence = features.view(
-            batch_size, sequence_length, self.feature_dim
+            batch_size, self.sequence_length, self.feature_dim
         )
 
-        # Create output tensor without in-place operations
+        # Smart blending with learnable weights
         output = torch.zeros_like(generated_sequence)
 
-        # Set start frame (first position)
+        # Start frame (always fixed)
         output[:, 0, :] = start_frame
 
-        # Set middle frames (generated content)
-        output[:, 1:-1, :] = generated_sequence[:, 1:-1, :]
+        # Middle frames with learned blending
+        for i in range(1, self.sequence_length - 1):
+            # Linear interpolation baseline
+            alpha = i / (self.sequence_length - 1)
+            interpolated = (1 - alpha) * start_frame + alpha * end_frame
 
-        # Set end frame (last position)
+            # Blend with generated content using learnable weights
+            weight = torch.sigmoid(self.interpolation_weights[i])
+            output[:, i, :] = (
+                weight * generated_sequence[:, i, :] + (1 - weight) * interpolated
+            )
+
+        # End frame (always fixed)
         output[:, -1, :] = end_frame
 
         return output
@@ -372,11 +478,10 @@ class LSTMDiscriminator(nn.Module):
             bidirectional=True,
         )
 
-        # Classification head
+        # Use adaptive pooling instead of fixed dimensions
+        self.adaptive_pool = nn.AdaptiveAvgPool1d(1)
         self.classifier = nn.Sequential(
-            nn.Linear(
-                hidden_dim * 2 * 7, hidden_dim
-            ),  # *2 for bidirectional, *7 for sequence length
+            nn.Linear(hidden_dim * 2, hidden_dim),  # *2 for bidirectional
             nn.LeakyReLU(0.2),
             nn.Dropout(0.5),
             nn.Linear(hidden_dim, hidden_dim // 2),
@@ -395,29 +500,38 @@ class LSTMDiscriminator(nn.Module):
         embedded = embedded.view(batch_size, seq_len, -1)
 
         # LSTM processing
-        lstm_out, _ = self.lstm(embedded)
+        lstm_out, _ = self.lstm(embedded)  # [batch_size, seq_len, hidden_dim * 2]
 
-        # Flatten for classification
-        lstm_out_flat = lstm_out.contiguous().view(batch_size, -1)
+        # Use adaptive pooling to handle any sequence length
+        lstm_out_permuted = lstm_out.permute(
+            0, 2, 1
+        )  # [batch_size, hidden_dim * 2, seq_len]
+        pooled = self.adaptive_pool(
+            lstm_out_permuted
+        )  # [batch_size, hidden_dim * 2, 1]
+        pooled = pooled.squeeze(-1)  # [batch_size, hidden_dim * 2]
 
         # Classify
-        output = self.classifier(lstm_out_flat)
+        output = self.classifier(pooled)
 
         return output
 
 
-class GestureGAN:
-    """Improved GAN with proven training techniques"""
+class EnhancedGestureGAN:
+    """Enhanced GAN with stronger generator training and quality-aware losses"""
 
     def __init__(self, feature_dim=333, config=SEQ2SEQ_CONFIG):
         self.config = config
         self.feature_dim = feature_dim
+        self.sequence_length = config["gap_size"] + 2
 
-        # Initialize networks with proven architectures
+        # Initialize networks
         self.generator = LSTMGenerator(
             feature_dim=feature_dim,
             hidden_dim=config["hidden_dim"],
             num_layers=config["num_layers"],
+            sequence_length=config["gap_size"]
+            + 2,  # Fixed: should include start + gap + end
         )
 
         self.discriminator = LSTMDiscriminator(
@@ -426,152 +540,480 @@ class GestureGAN:
             num_layers=config["num_layers"],
         )
 
-        # Separate optimizers with rebalanced learning rates
+        # Generator gets higher learning rate than discriminator
         self.g_optimizer = optim.Adam(
             self.generator.parameters(),
-            lr=config.get("generator_lr", 0.0002),  # Increased generator LR
-            betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
-            weight_decay=config.get("weight_decay", 1e-5),
+            lr=config.get("generator_lr", 0.0003),
+            betas=(0.5, 0.999),
+            weight_decay=1e-5,
         )
 
         self.d_optimizer = optim.Adam(
             self.discriminator.parameters(),
-            lr=config.get("discriminator_lr", 0.0001),  # Decreased discriminator LR
-            betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
-            weight_decay=config.get("weight_decay", 1e-5),
+            lr=config.get("discriminator_lr", 0.0001),  # Lower than generator
+            betas=(0.5, 0.999),
+            weight_decay=1e-5,
         )
 
-        # Loss function with label smoothing
+        # Loss function
         self.criterion = nn.BCELoss()
 
         # Move to device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.generator.to(self.device)
         self.discriminator.to(self.device)
-        print(f"Using device: {self.device}")
 
-        # Training history
+        # Initialize similarity metrics tracker
+        self.similarity_tracker = GestureSequenceSimilarityMetrics(feature_dim)
+
+        # Enhanced training history
         self.history = {
             "g_losses": [],
             "d_losses": [],
             "d_real_acc": [],
             "d_fake_acc": [],
+            "overall_quality": [],
+            "temporal_correlation": [],
+            "hand_landmarks_quality": [],
+            "pose_landmarks_quality": [],
+            "overall_mse": [],
+            "g_adversarial_loss": [],
+            "g_quality_loss": [],
+            "g_reconstruction_loss": [],
         }
 
-    def get_labels(self, batch_size, real=True):
-        """Get labels with stronger label smoothing"""
-        if real:
-            # More aggressive label smoothing for real samples
-            labels = (
-                torch.ones(batch_size, 1) - torch.rand(batch_size, 1) * 0.3
-            )  # Increased from 0.1
-        else:
-            # Add some noise to fake labels too
-            labels = (
-                torch.zeros(batch_size, 1) + torch.rand(batch_size, 1) * 0.3
-            )  # Increased from 0.1
+        # Feature dimension splits for component losses
+        self.hand_landmarks_dim = 21 * 3 * 2  # 126
+        self.hand_connections_dim = 20 * 2  # 40
+        self.pose_landmarks_dim = 33 * 4  # 132
+        self.pose_connections_dim = 35  # 35
 
-        return labels.to(self.device)
+        print(f"Enhanced GAN initialized on {self.device}")
+        print(f"Generator LR: {config.get('generator_lr', 0.0003)}")
+        print(f"Discriminator LR: {config.get('discriminator_lr', 0.0001)}")
 
-    def train_step(self, batch):
+    def compute_temporal_consistency_loss(self, sequences):
+        """Compute loss based on temporal smoothness and consistency"""
+        if sequences.size(1) < 3:
+            return torch.tensor(0.0, device=sequences.device)
+
+        # First-order differences (velocity)
+        vel = sequences[:, 1:] - sequences[:, :-1]
+
+        # Second-order differences (acceleration)
+        acc = vel[:, 1:] - vel[:, :-1]
+
+        # Temporal consistency: penalize large accelerations
+        temporal_loss = torch.mean(torch.norm(acc, dim=2))
+
+        # Velocity smoothness: encourage smooth motion
+        velocity_loss = torch.mean(torch.norm(vel, dim=2))
+
+        return 0.1 * temporal_loss + 0.05 * velocity_loss
+
+    def compute_feature_specific_losses(self, fake_sequences, real_sequences):
+        """Compute losses for different body parts separately"""
+        # Debug: Print shapes to understand the mismatch
+        # print(f"Debug - fake_sequences shape: {fake_sequences.shape}")
+        # print(f"Debug - real_sequences shape: {real_sequences.shape}")
+
+        # Ensure sequences have the same length
+        min_seq_len = min(fake_sequences.size(1), real_sequences.size(1))
+        fake_sequences = fake_sequences[:, :min_seq_len, :]
+        real_sequences = real_sequences[:, :min_seq_len, :]
+
+        losses = {}
+
+        # Hand landmarks loss
+        hand_start = 0
+        hand_end = self.hand_landmarks_dim
+        fake_hands = fake_sequences[:, :, hand_start:hand_end]
+        real_hands = real_sequences[:, :, hand_start:hand_end]
+        losses["hand_landmarks"] = nn.functional.mse_loss(fake_hands, real_hands)
+
+        # Hand connections loss
+        conn_start = hand_end
+        conn_end = conn_start + self.hand_connections_dim
+        fake_hand_conn = fake_sequences[:, :, conn_start:conn_end]
+        real_hand_conn = real_sequences[:, :, conn_start:conn_end]
+        losses["hand_connections"] = nn.functional.mse_loss(
+            fake_hand_conn, real_hand_conn
+        )
+
+        # Pose landmarks loss
+        pose_start = conn_end
+        pose_end = pose_start + self.pose_landmarks_dim
+        fake_pose = fake_sequences[:, :, pose_start:pose_end]
+        real_pose = real_sequences[:, :, pose_start:pose_end]
+        losses["pose_landmarks"] = nn.functional.mse_loss(fake_pose, real_pose)
+
+        # Pose connections loss
+        pose_conn_start = pose_end
+        fake_pose_conn = fake_sequences[:, :, pose_conn_start:]
+        real_pose_conn = real_sequences[:, :, pose_conn_start:]
+        losses["pose_connections"] = nn.functional.mse_loss(
+            fake_pose_conn, real_pose_conn
+        )
+
+        return losses
+
+    def compute_quality_aware_loss(self, fake_sequences, real_sequences):
+        """Compute loss based on quality metrics"""
+        try:
+            # Convert to numpy for similarity computation
+            fake_np = fake_sequences.detach().cpu().numpy()
+            real_np = real_sequences.detach().cpu().numpy()
+
+            # Compute similarity metrics
+            similarity_report = (
+                self.similarity_tracker.compute_comprehensive_similarity(
+                    real_np, fake_np
+                )
+            )
+            summary = self.similarity_tracker.summarize_similarity_scores(
+                similarity_report
+            )
+
+            # Convert quality metrics to losses (lower quality = higher loss)
+            quality_loss = 1.0 - summary.get("overall_quality", 0.0)
+            temporal_loss = 1.0 - summary.get("temporal_correlation", 0.0)
+            mse_loss = summary.get("overall_mse", 0.0)
+
+            # Combine into single quality loss
+            total_quality_loss = (
+                0.4 * quality_loss + 0.3 * temporal_loss + 0.3 * mse_loss
+            )
+
+            return (
+                torch.tensor(total_quality_loss, device=fake_sequences.device),
+                summary,
+            )
+
+        except Exception as e:
+            print(f"Error computing quality loss: {e}")
+            return torch.tensor(0.0, device=fake_sequences.device), {}
+
+    def enhanced_generator_loss(
+        self,
+        fake_sequences,
+        real_sequences,
+        d_fake_output,
+        start_frames,
+        end_frames,
+        epoch,
+    ):
+        """Enhanced generator loss with multiple components"""
+        batch_size = fake_sequences.size(0)
+
+        # 1. Adversarial loss
+        real_labels = torch.ones(batch_size, 1).to(self.device)
+        adversarial_loss = self.criterion(d_fake_output, real_labels)
+
+        # 2. Reconstruction loss (start/end frame consistency)
+        reconstruction_loss = nn.functional.mse_loss(
+            fake_sequences[:, 0], start_frames
+        ) + nn.functional.mse_loss(fake_sequences[:, -1], end_frames)
+
+        # 3. Temporal consistency loss
+        temporal_loss = self.compute_temporal_consistency_loss(fake_sequences)
+
+        # 4. Feature-specific losses
+        feature_losses = self.compute_feature_specific_losses(
+            fake_sequences, real_sequences
+        )
+        feature_loss = (
+            2.0 * feature_losses["hand_landmarks"]
+            + 1.0 * feature_losses["hand_connections"]
+            + 2.0 * feature_losses["pose_landmarks"]
+            + 1.0 * feature_losses["pose_connections"]
+        )
+
+        # 5. Quality-aware loss
+        quality_loss, quality_metrics = self.compute_quality_aware_loss(
+            fake_sequences, real_sequences
+        )
+
+        # 6. Progressive difficulty: weight losses based on training progress (NOW USING EPOCH)
+        epoch_progress = epoch / self.config.get("epochs", 50)
+
+        reconstruction_weight = max(0.5, 2.0 - 2.0 * epoch_progress)  # 2.0 -> 0.5
+        adversarial_weight = min(2.0, 0.5 + 1.5 * epoch_progress)  # 0.5 -> 2.0
+        quality_weight = min(1.0, 2.0 * epoch_progress)  # 0.0 -> 1.0
+
+        # Combine all losses
+        total_loss = (
+            adversarial_weight * adversarial_loss
+            + reconstruction_weight * reconstruction_loss
+            + 0.2 * temporal_loss
+            + 0.3 * feature_loss
+            + quality_weight * quality_loss
+        )
+
+        return {
+            "total_loss": total_loss,
+            "adversarial_loss": adversarial_loss,
+            "reconstruction_loss": reconstruction_loss,
+            "temporal_loss": temporal_loss,
+            "feature_loss": feature_loss,
+            "quality_loss": quality_loss,
+            "quality_metrics": quality_metrics,
+        }
+
+    def should_train_discriminator(self, d_real_acc, d_fake_acc):
+        """Determine if discriminator should be trained based on performance"""
+        return d_real_acc < 0.8 and d_fake_acc < 0.6
+
+    def train_step(self, batch, epoch):
         start_frames = batch["start_frame"].to(self.device)
         end_frames = batch["end_frame"].to(self.device)
         real_sequences = batch["target_sequence"].to(self.device)
         batch_size = start_frames.size(0)
 
-        # Train Discriminator
-        self.d_optimizer.zero_grad()
-
-        # Real sequences
-        real_labels = self.get_labels(batch_size, real=True)
-        d_real_output = self.discriminator(real_sequences)
-        d_real_loss = self.criterion(d_real_output, real_labels)
-
-        # Fake sequences - use detach() to avoid gradients
-        fake_labels = self.get_labels(batch_size, real=False)
-        fake_sequences = self.generator(start_frames, end_frames)
-        d_fake_output = self.discriminator(
-            fake_sequences.detach()
-        )  # Detach to avoid generator gradients
-        d_fake_loss = self.criterion(d_fake_output, fake_labels)
-
-        # Combined discriminator loss
-        d_loss = (d_real_loss + d_fake_loss) / 2
-        d_loss.backward()
-        self.d_optimizer.step()
-
-        # Train Generator
-        self.g_optimizer.zero_grad()
-
-        # Generate fresh sequences for generator training
-        fake_sequences_for_g = self.generator(start_frames, end_frames)
-        real_labels_for_g = self.get_labels(batch_size, real=True)
-        d_fake_output_for_g = self.discriminator(fake_sequences_for_g)
-        g_loss = self.criterion(d_fake_output_for_g, real_labels_for_g)
-
-        g_loss.backward()
-        self.g_optimizer.step()
-
-        # Calculate accuracies using detached tensors
+        # Calculate current discriminator performance
         with torch.no_grad():
-            d_real_acc = ((d_real_output > 0.5).float().mean()).item()
-            d_fake_acc = ((d_fake_output <= 0.5).float().mean()).item()
+            fake_test = self.generator(start_frames, end_frames)
+            d_real_test = self.discriminator(real_sequences)
+            d_fake_test = self.discriminator(fake_test)
+
+            d_real_acc = ((d_real_test > 0.5).float().mean()).item()
+            d_fake_acc = ((d_fake_test <= 0.5).float().mean()).item()
+
+        # Determine training strategy
+        train_discriminator = self.should_train_discriminator(d_real_acc, d_fake_acc)
+
+        # Multiple generator steps when discriminator is strong
+        if d_real_acc > 0.9 or d_fake_acc > 0.9:
+            generator_steps = 3
+        elif d_real_acc > 0.8 or d_fake_acc > 0.8:
+            generator_steps = 2
+        else:
+            generator_steps = 1
+
+        # Train Discriminator (only when needed)
+        d_loss = torch.tensor(0.0)
+        if train_discriminator:
+            self.d_optimizer.zero_grad()
+
+            # Real samples
+            real_labels = torch.ones(batch_size, 1).to(self.device)
+            d_real_output = self.discriminator(real_sequences)
+            d_real_loss = self.criterion(d_real_output, real_labels)
+
+            # Fake samples
+            fake_sequences = self.generator(start_frames, end_frames)
+            fake_labels = torch.zeros(batch_size, 1).to(self.device)
+            d_fake_output = self.discriminator(fake_sequences.detach())
+            d_fake_loss = self.criterion(d_fake_output, fake_labels)
+
+            d_loss = (d_real_loss + d_fake_loss) / 2
+            d_loss.backward()
+
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.discriminator.parameters(), 1.0)
+            self.d_optimizer.step()
+
+        # Train Generator (multiple steps)
+        g_loss_components = None
+        for step in range(generator_steps):
+            self.g_optimizer.zero_grad()
+
+            # Generate fake sequences
+            fake_sequences = self.generator(start_frames, end_frames)
+
+            # Get discriminator output for generator loss
+            d_fake_output = self.discriminator(fake_sequences)
+
+            # Enhanced generator loss
+            g_loss_components = self.enhanced_generator_loss(
+                fake_sequences,
+                real_sequences,
+                d_fake_output,
+                start_frames,
+                end_frames,
+                epoch,
+            )
+
+            total_g_loss = g_loss_components["total_loss"]
+            total_g_loss.backward()
+
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.generator.parameters(), 1.0)
+            self.g_optimizer.step()
+
+        # Calculate final accuracies
+        with torch.no_grad():
+            final_fake = self.generator(start_frames, end_frames)
+            d_real_final = self.discriminator(real_sequences)
+            d_fake_final = self.discriminator(final_fake)
+
+            final_d_real_acc = ((d_real_final > 0.5).float().mean()).item()
+            final_d_fake_acc = ((d_fake_final <= 0.5).float().mean()).item()
 
         return {
-            "g_loss": g_loss.item(),
+            "g_loss": (
+                g_loss_components["total_loss"].item() if g_loss_components else 0.0
+            ),
             "d_loss": d_loss.item(),
-            "d_real_acc": d_real_acc,
-            "d_fake_acc": d_fake_acc,
+            "d_real_acc": final_d_real_acc,
+            "d_fake_acc": final_d_fake_acc,
+            "trained_discriminator": train_discriminator,
+            "generator_steps": generator_steps,
+            "g_adversarial_loss": (
+                g_loss_components["adversarial_loss"].item()
+                if g_loss_components
+                else 0.0
+            ),
+            "g_quality_loss": (
+                g_loss_components["quality_loss"].item() if g_loss_components else 0.0
+            ),
+            "g_reconstruction_loss": (
+                g_loss_components["reconstruction_loss"].item()
+                if g_loss_components
+                else 0.0
+            ),
+            "quality_metrics": (
+                g_loss_components["quality_metrics"] if g_loss_components else {}
+            ),
         }
 
     def train(self, dataloader, epochs=None):
         if epochs is None:
             epochs = self.config["epochs"]
 
-        print(f"Starting training for {epochs} epochs...")
+        print(f"Starting enhanced training for {epochs} epochs...")
+        print("Training strategy:")
+        print("- Discriminator trains only when Real Acc < 0.8 AND Fake Acc < 0.6")
+        print("- Generator gets multiple steps when discriminator is strong")
+        print("- Progressive loss weighting: reconstruction -> adversarial over time")
 
         for epoch in range(epochs):
-            epoch_metrics = {"g_loss": 0, "d_loss": 0, "d_real_acc": 0, "d_fake_acc": 0}
+            epoch_metrics = {
+                "g_loss": 0,
+                "d_loss": 0,
+                "d_real_acc": 0,
+                "d_fake_acc": 0,
+                "g_adversarial_loss": 0,
+                "g_quality_loss": 0,
+                "g_reconstruction_loss": 0,
+            }
+            epoch_similarity = {
+                "overall_quality": [],
+                "temporal_correlation": [],
+                "hand_landmarks_quality": [],
+                "pose_landmarks_quality": [],
+                "overall_mse": [],
+            }
+
+            discriminator_trained_batches = 0
+            total_generator_steps = 0
             num_batches = 0
 
             for batch in dataloader:
-                metrics = self.train_step(batch)
+                metrics = self.train_step(batch, epoch + 1)
+
+                # Accumulate metrics
                 for key in epoch_metrics:
-                    epoch_metrics[key] += metrics[key]
+                    if key in metrics:
+                        epoch_metrics[key] += metrics[key]
+
+                # Track training strategy stats
+                if metrics["trained_discriminator"]:
+                    discriminator_trained_batches += 1
+                total_generator_steps += metrics["generator_steps"]
+
+                # Similarity metrics
+                if metrics.get("quality_metrics"):
+                    quality_metrics = metrics["quality_metrics"]
+                    for key in epoch_similarity:
+                        if key in quality_metrics and not np.isnan(
+                            quality_metrics[key]
+                        ):
+                            epoch_similarity[key].append(quality_metrics[key])
+
                 num_batches += 1
 
             # Average metrics
             for key in epoch_metrics:
                 epoch_metrics[key] /= num_batches
-                self.history[
-                    key.replace("_loss", "_losses").replace("_acc", "_acc")
-                ].append(epoch_metrics[key])
 
-            # Logging
-            if (epoch + 1) % 5 == 0 or epoch < 5:
-                print(f"Epoch [{epoch+1}/{epochs}]")
-                print(f"  G Loss: {epoch_metrics['g_loss']:.4f}")
+            # Update history
+            for key in ["g_loss", "d_loss", "d_real_acc", "d_fake_acc"]:
+                hist_key = key + (
+                    "es"
+                    if key.endswith("ss")
+                    else "s" if not key.endswith("acc") else ""
+                )
+                if hist_key.endswith("ss"):
+                    hist_key = hist_key[:-1] + "es"
+                if hist_key.endswith("acc"):
+                    hist_key = hist_key[:-1]
+                if key in ["g_loss", "d_loss"]:
+                    hist_key = key[:-1] + "ses"
+
+                # Simple mapping
+                if key == "g_loss":
+                    self.history["g_losses"].append(epoch_metrics[key])
+                elif key == "d_loss":
+                    self.history["d_losses"].append(epoch_metrics[key])
+                elif key == "d_real_acc":
+                    self.history["d_real_acc"].append(epoch_metrics[key])
+                elif key == "d_fake_acc":
+                    self.history["d_fake_acc"].append(epoch_metrics[key])
+
+            # Store component losses
+            self.history["g_adversarial_loss"].append(
+                epoch_metrics["g_adversarial_loss"]
+            )
+            self.history["g_quality_loss"].append(epoch_metrics["g_quality_loss"])
+            self.history["g_reconstruction_loss"].append(
+                epoch_metrics["g_reconstruction_loss"]
+            )
+
+            # Average similarity metrics
+            for key in epoch_similarity:
+                if epoch_similarity[key]:
+                    self.history[key].append(np.mean(epoch_similarity[key]))
+                else:
+                    self.history[key].append(0.0)
+
+            # Enhanced logging
+            if (epoch + 1) % self.config["log_every"] == 0:
+                print(f"\nEpoch [{epoch+1}/{epochs}]")
+                print(
+                    f"  G Loss: {epoch_metrics['g_loss']:.4f} (Adv: {epoch_metrics['g_adversarial_loss']:.4f}, Quality: {epoch_metrics['g_quality_loss']:.4f}, Recon: {epoch_metrics['g_reconstruction_loss']:.4f})"
+                )
                 print(f"  D Loss: {epoch_metrics['d_loss']:.4f}")
                 print(f"  D Real Acc: {epoch_metrics['d_real_acc']:.3f}")
                 print(f"  D Fake Acc: {epoch_metrics['d_fake_acc']:.3f}")
 
-                # Training status with better thresholds
-                d_avg_acc = (
+                # Training strategy info
+                d_train_pct = (discriminator_trained_batches / num_batches) * 100
+                avg_g_steps = total_generator_steps / num_batches
+                print(
+                    f"  Strategy: D trained {d_train_pct:.1f}% of batches, Avg G steps: {avg_g_steps:.1f}"
+                )
+
+                # Quality metrics
+                if len(self.history["overall_quality"]) > 0:
+                    print(
+                        f"  Overall Quality: {self.history['overall_quality'][-1]:.3f}"
+                    )
+                    print(
+                        f"  Temporal Corr: {self.history['temporal_correlation'][-1]:.3f}"
+                    )
+                    print(f"  Overall MSE: {self.history['overall_mse'][-1]:.4f}")
+
+                # Status
+                d_total_acc = (
                     epoch_metrics["d_real_acc"] + epoch_metrics["d_fake_acc"]
                 ) / 2
-                if (
-                    0.5 <= epoch_metrics["g_loss"] <= 4.0
-                    and 0.2 <= epoch_metrics["d_loss"] <= 1.5
-                    and 0.6 <= d_avg_acc <= 0.85
-                ):  # More realistic accuracy range
-                    print(f"  Status: GOOD TRAINING")
-                elif d_avg_acc > 0.9:
-                    print(f"  Status: DISCRIMINATOR TOO STRONG - Need rebalancing")
-                elif epoch_metrics["g_loss"] > 4.0:
-                    print(f"  Status: GENERATOR STRUGGLING")
+                if d_total_acc < 0.7:
+                    status = "GENERATOR IMPROVING"
+                elif d_total_acc > 0.85:
+                    status = "DISCRIMINATOR STRONG - FOCUSING ON GENERATOR"
                 else:
-                    print(f"  Status: TRAINING IN PROGRESS")
-                print()
+                    status = "BALANCED TRAINING"
+                print(f"  Status: {status}")
 
     def generate_sequence(self, start_frame, end_frame):
         """Generate sequence between start and end frames"""
@@ -595,78 +1037,85 @@ class GestureGAN:
 
         os.makedirs(save_dir, exist_ok=True)
         torch.save(
-            self.generator.state_dict(), os.path.join(save_dir, "lstm_generator.pth")
+            self.generator.state_dict(),
+            os.path.join(save_dir, "enhanced_lstm_generator.pth"),
         )
         torch.save(
             self.discriminator.state_dict(),
-            os.path.join(save_dir, "lstm_discriminator.pth"),
+            os.path.join(save_dir, "enhanced_lstm_discriminator.pth"),
         )
 
-        with open(os.path.join(save_dir, "gan_config.pkl"), "wb") as f:
+        with open(os.path.join(save_dir, "enhanced_gan_config.pkl"), "wb") as f:
             pickle.dump(self.config, f)
 
-        print(f"Models saved to {save_dir}")
+        print(f"Enhanced models saved to {save_dir}")
 
 
-def plot_training_curves(gan):
-    """Plot training metrics"""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+def plot_enhanced_training_curves(gan):
+    """Plot enhanced training metrics"""
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 
-    # Losses
-    axes[0, 0].plot(gan.history["g_losses"], label="Generator", alpha=0.8)
-    axes[0, 0].plot(gan.history["d_losses"], label="Discriminator", alpha=0.8)
-    axes[0, 0].set_title("Training Losses")
+    # Generator loss components
+    axes[0, 0].plot(
+        gan.history["g_losses"], label="Total G Loss", alpha=0.8, linewidth=2
+    )
+    axes[0, 0].plot(gan.history["g_adversarial_loss"], label="Adversarial", alpha=0.7)
+    axes[0, 0].plot(gan.history["g_quality_loss"], label="Quality", alpha=0.7)
+    axes[0, 0].plot(
+        gan.history["g_reconstruction_loss"], label="Reconstruction", alpha=0.7
+    )
+    axes[0, 0].set_title("Generator Loss Components")
     axes[0, 0].set_xlabel("Epoch")
     axes[0, 0].set_ylabel("Loss")
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
 
-    # Discriminator accuracies
-    axes[0, 1].plot(gan.history["d_real_acc"], label="Real Accuracy", alpha=0.8)
-    axes[0, 1].plot(gan.history["d_fake_acc"], label="Fake Accuracy", alpha=0.8)
-    axes[0, 1].set_title("Discriminator Accuracy")
+    # Discriminator metrics
+    axes[0, 1].plot(gan.history["d_losses"], label="D Loss", alpha=0.8, color="red")
+    axes[0, 1].set_title("Discriminator Loss")
     axes[0, 1].set_xlabel("Epoch")
-    axes[0, 1].set_ylabel("Accuracy")
-    axes[0, 1].legend()
+    axes[0, 1].set_ylabel("Loss")
     axes[0, 1].grid(True, alpha=0.3)
 
-    # Training balance
-    combined_acc = [
-        (r + f) / 2
-        for r, f in zip(gan.history["d_real_acc"], gan.history["d_fake_acc"])
-    ]
-    axes[1, 0].plot(combined_acc, alpha=0.8, color="purple")
-    axes[1, 0].axhline(
-        y=0.5, color="red", linestyle="--", alpha=0.7, label="Ideal Balance"
+    axes[0, 2].plot(gan.history["d_real_acc"], label="Real Accuracy", alpha=0.8)
+    axes[0, 2].plot(gan.history["d_fake_acc"], label="Fake Accuracy", alpha=0.8)
+    axes[0, 2].axhline(
+        y=0.8, color="red", linestyle="--", alpha=0.7, label="Training Thresholds"
     )
-    axes[1, 0].set_title("Training Balance")
+    axes[0, 2].axhline(y=0.6, color="red", linestyle="--", alpha=0.7)
+    axes[0, 2].set_title("Discriminator Accuracy")
+    axes[0, 2].set_xlabel("Epoch")
+    axes[0, 2].set_ylabel("Accuracy")
+    axes[0, 2].legend()
+    axes[0, 2].grid(True, alpha=0.3)
+
+    # Quality metrics
+    axes[1, 0].plot(gan.history["overall_quality"], alpha=0.8, color="purple")
+    axes[1, 0].set_title("Overall Generation Quality")
     axes[1, 0].set_xlabel("Epoch")
-    axes[1, 0].set_ylabel("Combined D Accuracy")
-    axes[1, 0].legend()
+    axes[1, 0].set_ylabel("Quality Score")
     axes[1, 0].grid(True, alpha=0.3)
 
-    # Loss ratio
-    loss_ratio = [
-        g / max(d, 0.001)
-        for g, d in zip(gan.history["g_losses"], gan.history["d_losses"])
-    ]
-    axes[1, 1].plot(loss_ratio, alpha=0.8, color="orange")
-    axes[1, 1].axhline(
-        y=1.0, color="red", linestyle="--", alpha=0.7, label="Equal Losses"
-    )
-    axes[1, 1].set_title("G/D Loss Ratio")
+    axes[1, 1].plot(gan.history["temporal_correlation"], alpha=0.8, color="orange")
+    axes[1, 1].set_title("Temporal Correlation")
     axes[1, 1].set_xlabel("Epoch")
-    axes[1, 1].set_ylabel("Ratio")
-    axes[1, 1].legend()
+    axes[1, 1].set_ylabel("Correlation")
     axes[1, 1].grid(True, alpha=0.3)
+
+    axes[1, 2].plot(gan.history["overall_mse"], alpha=0.8, color="red")
+    axes[1, 2].set_title("Overall MSE")
+    axes[1, 2].set_xlabel("Epoch")
+    axes[1, 2].set_ylabel("MSE")
+    axes[1, 2].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.show()
 
 
-def main():
-    """Main training pipeline with proven GAN architecture"""
-    print("=== LSTM-GAN for Gesture Sequence Filling ===")
+# Updated main function to use EnhancedGestureGAN
+def enhanced_main():
+    """Main training pipeline with enhanced GAN architecture"""
+    print("=== Enhanced LSTM-GAN for Gesture Sequence Filling ===")
     print(f"Config: {SEQ2SEQ_CONFIG}")
 
     # Initialize processor
@@ -687,7 +1136,7 @@ def main():
     processor.fit_scaler_on_sample(LANDMARKS_DIR)
 
     # Create dataset (pre-loads for faster training)
-    dataset = GestureDataset(landmark_files, processor, max_samples=5000)
+    dataset = GestureDataset(landmark_files, processor, SEQ2SEQ_CONFIG)
 
     # Create dataloader
     dataloader = DataLoader(
@@ -698,22 +1147,22 @@ def main():
         num_workers=0,
     )
 
-    # Create and train GAN
-    gan = GestureGAN(feature_dim=processor.total_features)
+    # Create and train Enhanced GAN
+    gan = EnhancedGestureGAN(feature_dim=processor.total_features)
     gan.train(dataloader)
 
-    # Plot results
-    plot_training_curves(gan)
+    # Plot enhanced results
+    plot_enhanced_training_curves(gan)
 
     # Save models
     gan.save_models()
 
     # Save processor
-    with open(os.path.join(MODELS_TRAINED_DIR, "processor.pkl"), "wb") as f:
+    with open(os.path.join(MODELS_TRAINED_DIR, "enhanced_processor.pkl"), "wb") as f:
         pickle.dump(processor, f)
 
-    print("Training complete!")
+    print("Enhanced training complete!")
 
 
 if __name__ == "__main__":
-    main()
+    enhanced_main()

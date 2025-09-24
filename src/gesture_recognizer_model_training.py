@@ -24,7 +24,10 @@ from constants import (
     LANDMARKS_DIR,
     MODELS_TRAINED_DIR,
 )
-import mediapipe as mp
+
+# Set random seeds
+torch.manual_seed(69)
+np.random.seed(69)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
