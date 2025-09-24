@@ -116,7 +116,7 @@ class LandmarkExtractor:
         landmarks_data = {
             "video_path": video_path,
             "timestamp": timestamp_str,
-            "frames": [],
+            "frames": [],  # This will hold ALL frames
             "landmark_types": self.landmark_types,
             "feature_info": self.get_feature_dimensions(),
             "max_feature_vector_size": self.get_feature_dimensions()["total_features"],
@@ -162,9 +162,7 @@ class LandmarkExtractor:
                             }
                             frame_data["hands"].append(hand_data)
                 except Exception as e:
-                    print(
-                        f"Error extracting hand landmarks from frame {frame_count}: {e}"
-                    )
+                    print(f"Error extracting hand landmarks from frame {frame_count}: {e}")
 
             # Pose detection
             if self.pose_landmarker:
@@ -181,12 +179,11 @@ class LandmarkExtractor:
                             )
                         frame_data["pose"] = {"landmarks": landmarks}
                 except Exception as e:
-                    print(
-                        f"Error extracting pose landmarks from frame {frame_count}: {e}"
-                    )
+                    print(f"Error extracting pose landmarks from frame {frame_count}: {e}")
 
-        landmarks_data["frames"].append(frame_data)
-        frame_count += 1
+            # CRITICAL FIX: Move this INSIDE the while loop
+            landmarks_data["frames"].append(frame_data)
+            frame_count += 1
 
         cap.release()
 
@@ -201,7 +198,6 @@ class LandmarkExtractor:
         self.processing_metadata["total_frames"] += frame_count
 
         return landmarks_data
-
     def process_video_folder(self, videos_path, landmarks_path):
         """
         Process all videos in the folder structure and save landmarks

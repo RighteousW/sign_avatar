@@ -9,8 +9,15 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 import random
+import json
 
-from constants import LANDMARKS_DIR, MODELS_TRAINED_DIR, SEQ2SEQ_CONFIG
+from constants import (
+    LANDMARKS_DIR,
+    LANDMARKS_DIR_METADATA_JSON,
+    LANDMARKS_DIR_METADATA_PKL,
+    MODELS_TRAINED_DIR,
+    SEQ2SEQ_CONFIG,
+)
 from similarity_metrics import GestureSequenceSimilarityMetrics
 
 # Set random seeds
@@ -19,103 +26,235 @@ np.random.seed(42)
 random.seed(42)
 
 
-class LandmarkProcessor:
-    """Processes MediaPipe landmark data into standardized feature vectors"""
+def load_extraction_metadata():
+    """Load metadata from landmark extraction to configure model"""
+    metadata = None
 
-    def __init__(self):
+    # Try loading from pickle first (more complete), then JSON
+    if os.path.exists(LANDMARKS_DIR_METADATA_PKL):
+        try:
+            with open(LANDMARKS_DIR_METADATA_PKL, "rb") as f:
+                metadata = pickle.load(f)
+            print(f"Loaded metadata from: {LANDMARKS_DIR_METADATA_PKL}")
+        except Exception as e:
+            print(f"Error loading pickle metadata: {e}")
+
+    if metadata is None and os.path.exists(LANDMARKS_DIR_METADATA_JSON):
+        try:
+            with open(LANDMARKS_DIR_METADATA_JSON, "r") as f:
+                metadata = json.load(f)
+            print(f"Loaded metadata from: {LANDMARKS_DIR_METADATA_JSON}")
+        except Exception as e:
+            print(f"Error loading JSON metadata: {e}")
+
+    if metadata is None:
+        raise FileNotFoundError(
+            f"No metadata found. Please run landmark extraction first to generate "
+            f"{LANDMARKS_DIR_METADATA_PKL} or {LANDMARKS_DIR_METADATA_JSON}"
+        )
+
+    return metadata
+
+
+def create_config_from_metadata(metadata, base_config=None):
+    """Create training configuration based on extraction metadata"""
+    if base_config is None:
+        base_config = SEQ2SEQ_CONFIG.copy()
+
+    feature_info = metadata.get("feature_info", {})
+    landmark_types = metadata.get("landmark_types", [])
+
+    # Configure feature dimensions
+    config = base_config.copy()
+    config["feature_dim"] = feature_info.get("total_features", 333)
+    config["landmark_types"] = landmark_types
+    config["feature_breakdown"] = {
+        "hand_landmarks_dim": feature_info.get("hand_landmarks", 0),
+        "pose_landmarks_dim": feature_info.get("pose_landmarks", 0),
+        "total_features": feature_info.get("total_features", 333),
+    }
+
+    # Adjust model capacity based on feature complexity
+    total_features = config["feature_dim"]
+    if total_features > 300:
+        config["hidden_dim"] = max(config.get("hidden_dim", 128), 256)
+        config["num_layers"] = max(config.get("num_layers", 2), 3)
+    elif total_features > 150:
+        config["hidden_dim"] = max(config.get("hidden_dim", 128), 192)
+        config["num_layers"] = max(config.get("num_layers", 2), 3)
+
+    # Adjust training parameters based on dataset size
+    total_videos = metadata.get("total_videos", 0)
+    if total_videos < 100:
+        config["epochs"] = max(
+            config.get("epochs", 50), 100
+        )  # More epochs for small datasets
+        config["batch_size"] = min(config.get("batch_size", 32), 16)  # Smaller batches
+    elif total_videos > 1000:
+        config["epochs"] = min(
+            config.get("epochs", 50), 30
+        )  # Fewer epochs for large datasets
+        config["batch_size"] = max(config.get("batch_size", 32), 64)  # Larger batches
+
+    print(f"Configuration created from metadata:")
+    print(f"  Feature dimensions: {config['feature_dim']}")
+    print(f"  Landmark types: {config['landmark_types']}")
+    print(f"  Hidden dim: {config['hidden_dim']}")
+    print(f"  Num layers: {config['num_layers']}")
+    print(f"  Total videos in dataset: {total_videos}")
+    print(f"  Adjusted epochs: {config['epochs']}")
+    print(f"  Adjusted batch size: {config['batch_size']}")
+
+    return config
+
+
+class MetadataAwareLandmarkProcessor:
+    """Enhanced processor that uses extraction metadata for configuration"""
+
+    def __init__(self, metadata=None):
+        if metadata is None:
+            metadata = load_extraction_metadata()
+
+        self.metadata = metadata
+        self.feature_info = metadata.get("feature_info", {})
+        self.landmark_types = metadata.get("landmark_types", [])
+
+        # Set feature dimensions from metadata
+        self.hand_landmarks_dim = self.feature_info.get("hand_landmarks", 0)
+        self.pose_landmarks_dim = self.feature_info.get("pose_landmarks", 0)
+        self.total_features = self.feature_info.get("total_features", 0)
+
+        # Initialize derived dimensions (if using connections - adjust as needed)
+        self.hand_connections_dim = (
+            20 * 2 if "hand_landmarks" in self.landmark_types else 0
+        )
+        self.pose_connections_dim = 35 if "pose_landmarks" in self.landmark_types else 0
+
+        # Update total if using connections
+        if hasattr(self, "use_connections") and self.use_connections:
+            self.total_features += self.hand_connections_dim + self.pose_connections_dim
+
         self.scaler = None
         self.is_fitted = False
 
-        # Feature dimensions based on your landmark extractor
-        self.hand_landmarks_dim = 21 * 3 * 2  # 126 (max 2 hands)
-        self.hand_connections_dim = 20 * 2  # 40 (20 connections per hand, max 2 hands)
-        self.pose_landmarks_dim = 33 * 4  # 132 (33 landmarks with x,y,z,visibility)
-        self.pose_connections_dim = 35  # 35 pose connections
-
-        self.total_features = (
-            self.hand_landmarks_dim
-            + self.hand_connections_dim
-            + self.pose_landmarks_dim
-            + self.pose_connections_dim
-        )
-
-        print(f"Total feature dimensions: {self.total_features}")
+        print(f"MetadataAwareLandmarkProcessor initialized:")
+        print(f"  Hand landmarks dim: {self.hand_landmarks_dim}")
+        print(f"  Pose landmarks dim: {self.pose_landmarks_dim}")
+        print(f"  Total feature dimensions: {self.total_features}")
+        print(f"  Landmark types: {self.landmark_types}")
 
     def extract_frame_features(self, frame_data):
-        """Extract features from a single frame"""
+        """Extract features from a single frame based on metadata configuration"""
         features = np.zeros(self.total_features, dtype=np.float32)
+        current_idx = 0
 
-        # Process hand landmarks and connections
-        hand_features = np.zeros(
-            self.hand_landmarks_dim + self.hand_connections_dim, dtype=np.float32
-        )
+        # Process hand landmarks if configured
+        if "hand_landmarks" in self.landmark_types and self.hand_landmarks_dim > 0:
+            hand_features = np.zeros(self.hand_landmarks_dim, dtype=np.float32)
 
-        for i, hand_data in enumerate(frame_data.get("hands", [])[:2]):  # Max 2 hands
-            landmarks = hand_data.get("landmarks", [])
-            connections = hand_data.get("connection_features", [])
+            # Extract up to 2 hands (based on metadata configuration)
+            max_hands = self.feature_info.get("max_hands", 2)
+            landmarks_per_hand = self.feature_info.get(
+                "hand_landmarks_per_hand", 63
+            )  # 21*3
 
-            # Hand landmarks (21 * 3 = 63 features per hand)
-            start_idx = i * 63
-            for j, landmark in enumerate(landmarks[:21]):
-                if j < 21:  # Ensure we don't exceed bounds
-                    hand_features[start_idx + j * 3 : start_idx + (j + 1) * 3] = (
-                        landmark[:3]
-                    )
+            for i, hand_data in enumerate(frame_data.get("hands", [])[:max_hands]):
+                landmarks = hand_data.get("landmarks", [])
+                start_idx = i * landmarks_per_hand
 
-            # Hand connections (20 features per hand)
-            conn_start_idx = self.hand_landmarks_dim + i * 20
-            for j, conn in enumerate(connections[:20]):
-                if j < 20:
-                    hand_features[conn_start_idx + j] = conn
+                for j, landmark in enumerate(landmarks[:21]):  # 21 landmarks per hand
+                    if start_idx + j * 3 + 2 < len(hand_features):
+                        hand_features[start_idx + j * 3 : start_idx + (j + 1) * 3] = (
+                            landmark[:3]
+                        )
 
-        features[: self.hand_landmarks_dim + self.hand_connections_dim] = hand_features
+            features[current_idx : current_idx + self.hand_landmarks_dim] = (
+                hand_features
+            )
+            current_idx += self.hand_landmarks_dim
 
-        # Process pose landmarks and connections
-        pose_data = frame_data.get("pose")
-        if pose_data:
-            landmarks = pose_data.get("landmarks", [])
-            connections = pose_data.get("connection_features", [])
+        # Process pose landmarks if configured
+        if "pose_landmarks" in self.landmark_types and self.pose_landmarks_dim > 0:
+            pose_data = frame_data.get("pose")
+            if pose_data:
+                landmarks = pose_data.get("landmarks", [])
+                pose_features = np.zeros(self.pose_landmarks_dim, dtype=np.float32)
 
-            # Pose landmarks (33 * 4 = 132 features)
-            pose_start = self.hand_landmarks_dim + self.hand_connections_dim
-            for i, landmark in enumerate(landmarks[:33]):
-                if i < 33:
-                    features[pose_start + i * 4 : pose_start + (i + 1) * 4] = landmark[
-                        :4
-                    ]
+                coords_per_landmark = self.feature_info.get(
+                    "pose_coords_per_landmark", 4
+                )
+                max_landmarks = self.feature_info.get("pose_total_landmarks", 33)
 
-            # Pose connections (35 features)
-            conn_start = pose_start + self.pose_landmarks_dim
-            for i, conn in enumerate(connections[:35]):
-                if i < 35:
-                    features[conn_start + i] = conn
+                for i, landmark in enumerate(landmarks[:max_landmarks]):
+                    if i * coords_per_landmark + coords_per_landmark <= len(
+                        pose_features
+                    ):
+                        pose_features[
+                            i * coords_per_landmark : (i + 1) * coords_per_landmark
+                        ] = landmark[:coords_per_landmark]
+
+                features[current_idx : current_idx + self.pose_landmarks_dim] = (
+                    pose_features
+                )
+                current_idx += self.pose_landmarks_dim
 
         return features
 
     def get_all_landmark_files(self, landmarks_dir):
-        """Get all landmark pickle files without loading them"""
+        """Get all landmark files, using metadata if available"""
         landmark_files = []
         landmarks_path = Path(landmarks_dir)
 
         if not landmarks_path.exists():
             raise ValueError(f"Landmarks directory not found: {landmarks_dir}")
 
-        for folder in landmarks_path.iterdir():
-            if folder.is_dir():
-                pkl_files = list(folder.glob("*_landmarks.pkl"))
-                landmark_files.extend(pkl_files)
+        # Use metadata info if available
+        processed_videos = self.metadata.get("processed_videos", [])
+        if processed_videos:
+            print(f"Using metadata to locate {len(processed_videos)} processed videos")
+
+            for video_info in processed_videos:
+                video_path = video_info.get("video_path", "")
+                if video_path:
+                    # Convert video path to landmark path
+                    video_file = os.path.basename(video_path)
+                    video_folder = os.path.dirname(video_path)
+                    folder_name = os.path.basename(video_folder)
+
+                    landmark_filename = video_file.replace(".avi", "_landmarks.pkl")
+                    landmark_path = landmarks_path / folder_name / landmark_filename
+
+                    if landmark_path.exists():
+                        landmark_files.append(landmark_path)
+
+        # Fallback to directory scan if metadata doesn't help
+        if not landmark_files:
+            print("Metadata didn't help locate files, scanning directories...")
+            for folder in landmarks_path.iterdir():
+                if folder.is_dir():
+                    pkl_files = list(folder.glob("*_landmarks.pkl"))
+                    landmark_files.extend(pkl_files)
 
         print(f"Found {len(landmark_files)} landmark files")
         return landmark_files
 
     def fit_scaler_on_sample(self, landmarks_dir, sample_size=1000):
-        """Fit scaler on a sample of data to avoid loading everything"""
+        """Fit scaler on a sample of data"""
         landmark_files = self.get_all_landmark_files(landmarks_dir)
 
-        # Sample files for fitting scaler
-        sample_files = random.sample(
-            landmark_files, min(len(landmark_files), sample_size // 50)
-        )
+        # Use metadata to inform sampling strategy
+        total_frames = self.metadata.get("total_frames", 0)
+        total_videos = self.metadata.get("total_videos", len(landmark_files))
+
+        if total_videos > 0:
+            frames_per_video = total_frames / total_videos
+            files_needed = min(
+                len(landmark_files), max(10, sample_size // int(frames_per_video))
+            )
+        else:
+            files_needed = min(len(landmark_files), sample_size // 50)
+
+        sample_files = random.sample(landmark_files, files_needed)
 
         sample_features = []
         for pkl_file in sample_files:
@@ -123,10 +262,8 @@ class LandmarkProcessor:
                 with open(pkl_file, "rb") as f:
                     landmark_data = pickle.load(f)
 
-                # Extract features from first few frames
-                for frame_data in landmark_data.get("frames", [])[
-                    :20
-                ]:  # Sample first 20 frames
+                # Extract features from frames
+                for frame_data in landmark_data.get("frames", [])[:20]:
                     frame_features = self.extract_frame_features(frame_data)
                     sample_features.append(frame_features)
 
@@ -160,97 +297,6 @@ class LandmarkProcessor:
             return self.scaler.transform(features)
 
 
-class GestureDataset(Dataset):
-    """Optimized dataset for gesture gap filling"""
-
-    def __init__(self, landmark_files, processor, config):
-        self.landmark_files = landmark_files
-        self.processor = processor
-        self.gap_size = config["gap_size"]
-        self.max_samples = config["max_samples"]
-        self.total_sequence_length = self.gap_size + 2
-
-        # Pre-load and process all data into memory for faster training
-        self.samples = []
-        self._load_all_samples()
-
-        print(f"Dataset ready with {len(self.samples)} samples")
-
-    def _load_all_samples(self):
-        """Pre-load all samples for faster training"""
-        print("Pre-loading dataset samples...")
-
-        # Sample files if we have too many
-        files_to_process = self.landmark_files[:2000]  # Limit files
-
-        for file_idx, pkl_file in enumerate(files_to_process):
-            if file_idx % 200 == 0:
-                print(f"  Loading from file {file_idx}/{len(files_to_process)}")
-
-            try:
-                with open(pkl_file, "rb") as f:
-                    landmark_data = pickle.load(f)
-
-                frames = landmark_data.get("frames", [])
-
-                if len(frames) < self.total_sequence_length:
-                    continue
-
-                # Convert all frames to features first
-                frame_features = []
-                for frame_data in frames:
-                    features = self.processor.extract_frame_features(frame_data)
-                    normalized = self.processor.normalize_features(features)
-                    frame_features.append(normalized)
-
-                frame_features = np.array(frame_features)
-
-                # Create gap pairs from this file
-                max_start = len(frame_features) - self.total_sequence_length
-
-                # Sample pairs from this file
-                num_pairs = min(max_start + 1, 10)  # Max 10 pairs per file
-                if max_start > 0:
-                    start_indices = np.random.choice(
-                        max_start + 1, size=num_pairs, replace=False
-                    )
-                else:
-                    start_indices = [0]
-
-                for start_idx in start_indices:
-                    sequence = frame_features[
-                        start_idx : start_idx + self.total_sequence_length
-                    ]
-
-                    self.samples.append(
-                        {
-                            "start_frame": sequence[0],
-                            "end_frame": sequence[-1],
-                            "target_sequence": sequence,
-                        }
-                    )
-
-                    if len(self.samples) >= self.max_samples:
-                        print(f"  Reached max samples ({self.max_samples})")
-                        return
-
-            except Exception as e:
-                continue
-
-        print(f"Loaded {len(self.samples)} samples into memory")
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        sample = self.samples[idx]
-        return {
-            "start_frame": torch.FloatTensor(sample["start_frame"]),
-            "end_frame": torch.FloatTensor(sample["end_frame"]),
-            "target_sequence": torch.FloatTensor(sample["target_sequence"]),
-        }
-
-
 class LSTMGenerator(nn.Module):
     """Enhanced LSTM-based Generator with improved architecture"""
 
@@ -278,7 +324,6 @@ class LSTMGenerator(nn.Module):
             nn.LeakyReLU(0.2),
             nn.BatchNorm1d(self.hidden_dim),
             nn.Dropout(0.1),
-            # Add residual connection
             nn.Linear(self.hidden_dim, self.hidden_dim),
             nn.LeakyReLU(0.2),
             nn.BatchNorm1d(self.hidden_dim),
@@ -322,7 +367,7 @@ class LSTMGenerator(nn.Module):
             num_layers=self.num_layers,
             batch_first=True,
             dropout=0.2 if self.num_layers > 1 else 0,
-            bidirectional=True,  # Add bidirectional processing
+            bidirectional=True,
         )
 
         # Attention mechanism for better sequence modeling
@@ -347,7 +392,7 @@ class LSTMGenerator(nn.Module):
             nn.BatchNorm1d(self.hidden_dim),
             nn.Dropout(0.1),
             nn.Linear(self.hidden_dim, feature_dim),
-            nn.Tanh(),  # Bounded output
+            nn.Tanh(),
         )
         self.sequence_length = sequence_length
 
@@ -372,13 +417,14 @@ class LSTMGenerator(nn.Module):
         combined_features = torch.cat([context, noise_features], dim=1)
 
         # Initialize hidden states from combined noise+context features
-        # Fix: The output should be 2x larger to accommodate both h_0 and c_0
         hidden_init = self.noise_to_hidden(combined_features)
 
         # Calculate the size needed for each hidden state
-        single_hidden_size = self.hidden_dim * self.num_layers * 2  # *2 for bidirectional
+        single_hidden_size = (
+            self.hidden_dim * self.num_layers * 2
+        )  # *2 for bidirectional
 
-        # Split the tensor correctly - use .contiguous().view() or .reshape()
+        # Split the tensor correctly
         h_0 = (
             hidden_init[:, :single_hidden_size]
             .contiguous()
@@ -399,18 +445,12 @@ class LSTMGenerator(nn.Module):
         # Create input sequence that incorporates both noise and positional info
         lstm_inputs = []
         for t in range(self.sequence_length):
-            # Add positional encoding to the noise+context features
             pos_weight = positions[t]
-
-            # Combine base features with positional information
-            pos_encoding = torch.full_like(
-                lstm_input_base, pos_weight * 0.1
-            )  # Scale positional info
+            pos_encoding = torch.full_like(lstm_input_base, pos_weight * 0.1)
             timestep_input = lstm_input_base + pos_encoding
-
             lstm_inputs.append(timestep_input)
 
-        lstm_input = torch.stack(lstm_inputs, dim=1)  # [batch, seq_len, hidden_dim]
+        lstm_input = torch.stack(lstm_inputs, dim=1)
 
         # LSTM processing with noise-initialized hidden states
         lstm_out, _ = self.lstm(lstm_input, (h_0, c_0))
@@ -517,30 +557,136 @@ class LSTMDiscriminator(nn.Module):
         return output
 
 
-class EnhancedGestureGAN:
-    """Enhanced GAN with stronger generator training and quality-aware losses"""
+class ConfigurableGestureDataset(Dataset):
+    """Dataset that uses metadata-driven configuration"""
 
-    def __init__(self, feature_dim=333, config=SEQ2SEQ_CONFIG):
+    def __init__(self, landmark_files, processor, config):
+        self.landmark_files = landmark_files
+        self.processor = processor
         self.config = config
-        self.feature_dim = feature_dim
+        self.gap_size = config["gap_size"]
+        self.max_samples = config["max_samples"]
+        self.total_sequence_length = self.gap_size + 2
+
+        # Pre-load and process all data into memory for faster training
+        self.samples = []
+        self._load_all_samples()
+
+        print(f"ConfigurableGestureDataset ready with {len(self.samples)} samples")
+        print(f"  Feature dimension: {processor.total_features}")
+        print(f"  Gap size: {self.gap_size}")
+        print(f"  Sequence length: {self.total_sequence_length}")
+
+    def _load_all_samples(self):
+        """Pre-load all samples for faster training"""
+        print("Pre-loading dataset samples...")
+
+        # Use metadata to inform file processing limits
+        if hasattr(self.processor, "metadata"):
+            total_videos = self.processor.metadata.get(
+                "total_videos", len(self.landmark_files)
+            )
+            files_to_process = self.landmark_files[: min(2000, total_videos)]
+        else:
+            files_to_process = self.landmark_files[:2000]
+
+        for file_idx, pkl_file in enumerate(files_to_process):
+            if file_idx % 200 == 0:
+                print(f"  Loading from file {file_idx}/{len(files_to_process)}")
+
+            try:
+                with open(pkl_file, "rb") as f:
+                    landmark_data = pickle.load(f)
+
+                frames = landmark_data.get("frames", [])
+
+                if len(frames) < self.total_sequence_length:
+                    continue
+
+                # Convert all frames to features first
+                frame_features = []
+                for frame_data in frames:
+                    features = self.processor.extract_frame_features(frame_data)
+                    normalized = self.processor.normalize_features(features)
+                    frame_features.append(normalized)
+
+                frame_features = np.array(frame_features)
+
+                # Create gap pairs from this file
+                max_start = len(frame_features) - self.total_sequence_length
+
+                # Sample pairs from this file
+                num_pairs = min(max_start + 1, 10)  # Max 10 pairs per file
+                if max_start > 0:
+                    start_indices = np.random.choice(
+                        max_start + 1, size=num_pairs, replace=False
+                    )
+                else:
+                    start_indices = [0]
+
+                for start_idx in start_indices:
+                    sequence = frame_features[
+                        start_idx : start_idx + self.total_sequence_length
+                    ]
+
+                    self.samples.append(
+                        {
+                            "start_frame": sequence[0],
+                            "end_frame": sequence[-1],
+                            "target_sequence": sequence,
+                        }
+                    )
+
+                    if len(self.samples) >= self.max_samples:
+                        print(f"  Reached max samples ({self.max_samples})")
+                        return
+
+            except Exception as e:
+                continue
+
+        print(f"Loaded {len(self.samples)} samples into memory")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        return {
+            "start_frame": torch.FloatTensor(sample["start_frame"]),
+            "end_frame": torch.FloatTensor(sample["end_frame"]),
+            "target_sequence": torch.FloatTensor(sample["target_sequence"]),
+        }
+
+
+class ConfigurableEnhancedGestureGAN:
+    """Enhanced GAN that configures itself based on metadata"""
+
+    def __init__(self, config):
+        self.config = config
+        self.feature_dim = config["feature_dim"]
         self.sequence_length = config["gap_size"] + 2
 
-        # Initialize networks
+        print(f"Initializing ConfigurableEnhancedGestureGAN:")
+        print(f"  Feature dimension: {self.feature_dim}")
+        print(f"  Hidden dimension: {config['hidden_dim']}")
+        print(f"  Number of layers: {config['num_layers']}")
+        print(f"  Sequence length: {self.sequence_length}")
+
+        # Initialize networks with metadata-driven configuration
         self.generator = LSTMGenerator(
-            feature_dim=feature_dim,
+            feature_dim=self.feature_dim,
             hidden_dim=config["hidden_dim"],
             num_layers=config["num_layers"],
-            sequence_length=config["gap_size"]
-            + 2,  # Fixed: should include start + gap + end
+            sequence_length=self.sequence_length,
         )
 
         self.discriminator = LSTMDiscriminator(
-            feature_dim=feature_dim,
+            feature_dim=self.feature_dim,
             hidden_dim=config["hidden_dim"],
             num_layers=config["num_layers"],
         )
 
-        # Generator gets higher learning rate than discriminator
+        # Configure optimizers
         self.g_optimizer = optim.Adam(
             self.generator.parameters(),
             lr=config.get("generator_lr", 0.0003),
@@ -550,7 +696,7 @@ class EnhancedGestureGAN:
 
         self.d_optimizer = optim.Adam(
             self.discriminator.parameters(),
-            lr=config.get("discriminator_lr", 0.0001),  # Lower than generator
+            lr=config.get("discriminator_lr", 0.0001),
             betas=(0.5, 0.999),
             weight_decay=1e-5,
         )
@@ -564,7 +710,7 @@ class EnhancedGestureGAN:
         self.discriminator.to(self.device)
 
         # Initialize similarity metrics tracker
-        self.similarity_tracker = GestureSequenceSimilarityMetrics(feature_dim)
+        self.similarity_tracker = GestureSequenceSimilarityMetrics(self.feature_dim)
 
         # Enhanced training history
         self.history = {
@@ -582,15 +728,19 @@ class EnhancedGestureGAN:
             "g_reconstruction_loss": [],
         }
 
-        # Feature dimension splits for component losses
-        self.hand_landmarks_dim = 21 * 3 * 2  # 126
-        self.hand_connections_dim = 20 * 2  # 40
-        self.pose_landmarks_dim = 33 * 4  # 132
-        self.pose_connections_dim = 35  # 35
+        # Feature dimension splits for component losses (from config)
+        feature_breakdown = config.get("feature_breakdown", {})
+        self.hand_landmarks_dim = feature_breakdown.get("hand_landmarks_dim", 126)
+        self.pose_landmarks_dim = feature_breakdown.get("pose_landmarks_dim", 132)
 
-        print(f"Enhanced GAN initialized on {self.device}")
-        print(f"Generator LR: {config.get('generator_lr', 0.0003)}")
-        print(f"Discriminator LR: {config.get('discriminator_lr', 0.0001)}")
+        # Derived dimensions (adjust if using connections)
+        self.hand_connections_dim = 40  # 20 * 2
+        self.pose_connections_dim = 35
+
+        print(f"ConfigurableEnhancedGestureGAN initialized on {self.device}")
+        print(
+            f"Feature breakdown - Hand: {self.hand_landmarks_dim}, Pose: {self.pose_landmarks_dim}"
+        )
 
     def compute_temporal_consistency_loss(self, sequences):
         """Compute loss based on temporal smoothness and consistency"""
@@ -613,10 +763,6 @@ class EnhancedGestureGAN:
 
     def compute_feature_specific_losses(self, fake_sequences, real_sequences):
         """Compute losses for different body parts separately"""
-        # Debug: Print shapes to understand the mismatch
-        # print(f"Debug - fake_sequences shape: {fake_sequences.shape}")
-        # print(f"Debug - real_sequences shape: {real_sequences.shape}")
-
         # Ensure sequences have the same length
         min_seq_len = min(fake_sequences.size(1), real_sequences.size(1))
         fake_sequences = fake_sequences[:, :min_seq_len, :]
@@ -624,36 +770,61 @@ class EnhancedGestureGAN:
 
         losses = {}
 
-        # Hand landmarks loss
-        hand_start = 0
-        hand_end = self.hand_landmarks_dim
-        fake_hands = fake_sequences[:, :, hand_start:hand_end]
-        real_hands = real_sequences[:, :, hand_start:hand_end]
-        losses["hand_landmarks"] = nn.functional.mse_loss(fake_hands, real_hands)
+        # Hand landmarks loss (if hand landmarks are present)
+        if self.hand_landmarks_dim > 0:
+            hand_start = 0
+            hand_end = self.hand_landmarks_dim
+            fake_hands = fake_sequences[:, :, hand_start:hand_end]
+            real_hands = real_sequences[:, :, hand_start:hand_end]
+            losses["hand_landmarks"] = nn.functional.mse_loss(fake_hands, real_hands)
+            current_idx = hand_end
+        else:
+            losses["hand_landmarks"] = torch.tensor(0.0, device=fake_sequences.device)
+            current_idx = 0
 
-        # Hand connections loss
-        conn_start = hand_end
-        conn_end = conn_start + self.hand_connections_dim
-        fake_hand_conn = fake_sequences[:, :, conn_start:conn_end]
-        real_hand_conn = real_sequences[:, :, conn_start:conn_end]
-        losses["hand_connections"] = nn.functional.mse_loss(
-            fake_hand_conn, real_hand_conn
-        )
+        # Hand connections loss (if using connections)
+        if self.hand_connections_dim > 0:
+            conn_start = current_idx
+            conn_end = conn_start + self.hand_connections_dim
+            if conn_end <= fake_sequences.size(2):
+                fake_hand_conn = fake_sequences[:, :, conn_start:conn_end]
+                real_hand_conn = real_sequences[:, :, conn_start:conn_end]
+                losses["hand_connections"] = nn.functional.mse_loss(
+                    fake_hand_conn, real_hand_conn
+                )
+                current_idx = conn_end
+            else:
+                losses["hand_connections"] = torch.tensor(
+                    0.0, device=fake_sequences.device
+                )
+        else:
+            losses["hand_connections"] = torch.tensor(0.0, device=fake_sequences.device)
 
-        # Pose landmarks loss
-        pose_start = conn_end
-        pose_end = pose_start + self.pose_landmarks_dim
-        fake_pose = fake_sequences[:, :, pose_start:pose_end]
-        real_pose = real_sequences[:, :, pose_start:pose_end]
-        losses["pose_landmarks"] = nn.functional.mse_loss(fake_pose, real_pose)
+        # Pose landmarks loss (if pose landmarks are present)
+        if self.pose_landmarks_dim > 0:
+            pose_start = current_idx
+            pose_end = pose_start + self.pose_landmarks_dim
+            if pose_end <= fake_sequences.size(2):
+                fake_pose = fake_sequences[:, :, pose_start:pose_end]
+                real_pose = real_sequences[:, :, pose_start:pose_end]
+                losses["pose_landmarks"] = nn.functional.mse_loss(fake_pose, real_pose)
+                current_idx = pose_end
+            else:
+                losses["pose_landmarks"] = torch.tensor(
+                    0.0, device=fake_sequences.device
+                )
+        else:
+            losses["pose_landmarks"] = torch.tensor(0.0, device=fake_sequences.device)
 
-        # Pose connections loss
-        pose_conn_start = pose_end
-        fake_pose_conn = fake_sequences[:, :, pose_conn_start:]
-        real_pose_conn = real_sequences[:, :, pose_conn_start:]
-        losses["pose_connections"] = nn.functional.mse_loss(
-            fake_pose_conn, real_pose_conn
-        )
+        # Pose connections loss (if using connections)
+        if self.pose_connections_dim > 0 and current_idx < fake_sequences.size(2):
+            fake_pose_conn = fake_sequences[:, :, current_idx:]
+            real_pose_conn = real_sequences[:, :, current_idx:]
+            losses["pose_connections"] = nn.functional.mse_loss(
+                fake_pose_conn, real_pose_conn
+            )
+        else:
+            losses["pose_connections"] = torch.tensor(0.0, device=fake_sequences.device)
 
         return losses
 
@@ -733,7 +904,7 @@ class EnhancedGestureGAN:
             fake_sequences, real_sequences
         )
 
-        # 6. Progressive difficulty: weight losses based on training progress (NOW USING EPOCH)
+        # 6. Progressive difficulty: weight losses based on training progress
         epoch_progress = epoch / self.config.get("epochs", 50)
 
         reconstruction_weight = max(0.5, 2.0 - 2.0 * epoch_progress)  # 2.0 -> 0.5
@@ -937,28 +1108,10 @@ class EnhancedGestureGAN:
                 epoch_metrics[key] /= num_batches
 
             # Update history
-            for key in ["g_loss", "d_loss", "d_real_acc", "d_fake_acc"]:
-                hist_key = key + (
-                    "es"
-                    if key.endswith("ss")
-                    else "s" if not key.endswith("acc") else ""
-                )
-                if hist_key.endswith("ss"):
-                    hist_key = hist_key[:-1] + "es"
-                if hist_key.endswith("acc"):
-                    hist_key = hist_key[:-1]
-                if key in ["g_loss", "d_loss"]:
-                    hist_key = key[:-1] + "ses"
-
-                # Simple mapping
-                if key == "g_loss":
-                    self.history["g_losses"].append(epoch_metrics[key])
-                elif key == "d_loss":
-                    self.history["d_losses"].append(epoch_metrics[key])
-                elif key == "d_real_acc":
-                    self.history["d_real_acc"].append(epoch_metrics[key])
-                elif key == "d_fake_acc":
-                    self.history["d_fake_acc"].append(epoch_metrics[key])
+            self.history["g_losses"].append(epoch_metrics["g_loss"])
+            self.history["d_losses"].append(epoch_metrics["d_loss"])
+            self.history["d_real_acc"].append(epoch_metrics["d_real_acc"])
+            self.history["d_fake_acc"].append(epoch_metrics["d_fake_acc"])
 
             # Store component losses
             self.history["g_adversarial_loss"].append(
@@ -977,7 +1130,7 @@ class EnhancedGestureGAN:
                     self.history[key].append(0.0)
 
             # Enhanced logging
-            if (epoch + 1) % self.config["log_every"] == 0:
+            if (epoch + 1) % self.config.get("log_every", 5) == 0:
                 print(f"\nEpoch [{epoch+1}/{epochs}]")
                 print(
                     f"  G Loss: {epoch_metrics['g_loss']:.4f} (Adv: {epoch_metrics['g_adversarial_loss']:.4f}, Quality: {epoch_metrics['g_quality_loss']:.4f}, Recon: {epoch_metrics['g_reconstruction_loss']:.4f})"
@@ -1032,23 +1185,40 @@ class EnhancedGestureGAN:
         return generated.cpu().numpy()
 
     def save_models(self, save_dir=None):
+        """Save models along with configuration"""
         if save_dir is None:
             save_dir = MODELS_TRAINED_DIR
 
         os.makedirs(save_dir, exist_ok=True)
+
+        # Save model weights
         torch.save(
             self.generator.state_dict(),
-            os.path.join(save_dir, "enhanced_lstm_generator.pth"),
+            os.path.join(save_dir, "configurable_lstm_generator.pth"),
         )
         torch.save(
             self.discriminator.state_dict(),
-            os.path.join(save_dir, "enhanced_lstm_discriminator.pth"),
+            os.path.join(save_dir, "configurable_lstm_discriminator.pth"),
         )
 
-        with open(os.path.join(save_dir, "enhanced_gan_config.pkl"), "wb") as f:
+        # Save complete configuration including metadata-derived settings
+        with open(os.path.join(save_dir, "configurable_gan_config.pkl"), "wb") as f:
             pickle.dump(self.config, f)
 
-        print(f"Enhanced models saved to {save_dir}")
+        # Save feature dimension mapping for inference
+        feature_config = {
+            "feature_dim": self.feature_dim,
+            "hand_landmarks_dim": self.hand_landmarks_dim,
+            "pose_landmarks_dim": self.pose_landmarks_dim,
+            "landmark_types": self.config.get("landmark_types", []),
+            "sequence_length": self.sequence_length,
+        }
+
+        with open(os.path.join(save_dir, "feature_config.json"), "w") as f:
+            json.dump(feature_config, f, indent=2)
+
+        print(f"Configurable models saved to {save_dir}")
+        print(f"Feature configuration saved for inference")
 
 
 def plot_enhanced_training_curves(gan):
@@ -1112,57 +1282,71 @@ def plot_enhanced_training_curves(gan):
     plt.show()
 
 
-# Updated main function to use EnhancedGestureGAN
-def enhanced_main():
-    """Main training pipeline with enhanced GAN architecture"""
-    print("=== Enhanced LSTM-GAN for Gesture Sequence Filling ===")
-    print(f"Config: {SEQ2SEQ_CONFIG}")
+def main():
+    """Main training pipeline with metadata-driven configuration"""
+    print("=== Metadata-Driven LSTM-GAN for Gesture Sequence Filling ===")
 
-    # Initialize processor
-    processor = LandmarkProcessor()
-
-    # Get landmark files
     try:
+        # Load extraction metadata
+        metadata = load_extraction_metadata()
+
+        # Create configuration from metadata
+        config = create_config_from_metadata(metadata)
+        print(f"Final config: {config}")
+
+        # Initialize metadata-aware processor
+        processor = MetadataAwareLandmarkProcessor(metadata)
+
+        # Get landmark files
         landmark_files = processor.get_all_landmark_files(LANDMARKS_DIR)
-    except Exception as e:
+
+        if not landmark_files:
+            print("No landmark files found!")
+            return
+
+        # Fit scaler
+        processor.fit_scaler_on_sample(LANDMARKS_DIR)
+
+        # Create configurable dataset
+        dataset = ConfigurableGestureDataset(landmark_files, processor, config)
+
+        # Create dataloader
+        dataloader = DataLoader(
+            dataset,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+        )
+
+        # Create and train Configurable GAN
+        gan = ConfigurableEnhancedGestureGAN(config)
+        gan.train(dataloader, epochs=config["epochs"])
+
+        # Plot enhanced results
+        plot_enhanced_training_curves(gan)
+
+        # Save models and processor
+        gan.save_models()
+
+        with open(
+            os.path.join(MODELS_TRAINED_DIR, "metadata_aware_processor.pkl"), "wb"
+        ) as f:
+            pickle.dump(processor, f)
+
+        print("Metadata-driven training complete!")
+        print(
+            "Models are configured for the exact landmark types and dimensions from your extraction process."
+        )
+
+    except FileNotFoundError as e:
         print(f"Error: {e}")
+        print("Please run the landmark extraction script first to generate metadata.")
         return
-
-    if not landmark_files:
-        print("No landmark files found!")
-        return
-
-    # Fit scaler
-    processor.fit_scaler_on_sample(LANDMARKS_DIR)
-
-    # Create dataset (pre-loads for faster training)
-    dataset = GestureDataset(landmark_files, processor, SEQ2SEQ_CONFIG)
-
-    # Create dataloader
-    dataloader = DataLoader(
-        dataset,
-        batch_size=SEQ2SEQ_CONFIG["batch_size"],
-        shuffle=True,
-        drop_last=True,
-        num_workers=0,
-    )
-
-    # Create and train Enhanced GAN
-    gan = EnhancedGestureGAN(feature_dim=processor.total_features)
-    gan.train(dataloader)
-
-    # Plot enhanced results
-    plot_enhanced_training_curves(gan)
-
-    # Save models
-    gan.save_models()
-
-    # Save processor
-    with open(os.path.join(MODELS_TRAINED_DIR, "enhanced_processor.pkl"), "wb") as f:
-        pickle.dump(processor, f)
-
-    print("Enhanced training complete!")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    enhanced_main()
+    main()
