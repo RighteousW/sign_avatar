@@ -1,16 +1,21 @@
-# File paths
+# Directory paths
 DATA_DIR = "./data"
 VIDEOS_DIR = DATA_DIR + "/videos"
 OUTPUT_DIR = "./output"
 LANDMARKS_DIR = DATA_DIR + "/landmarks"
-PROCESSED_GESTURE_DATA_PATH = DATA_DIR + "/processed_gesture_data.pkl"
-
-# model paths
 MODELS_DIR = "./models"
 MODELS_DEPENDENCY_DIR = MODELS_DIR + "/dependencies"
 MODELS_TRAINED_DIR = MODELS_DIR + "/trained_models"
+
+# model paths
+GESTURE_MODEL_PATH = MODELS_TRAINED_DIR + "/gesture_model.pth"
 MEDIAPIPE_HAND_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR + "/hand_landmarker.task"
 MEDIAPIPE_POSE_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR + "/pose_landmarker_lite.task"
+
+# metadata paths
+LANDMARKS_DIR_METADATA_PKL = LANDMARKS_DIR + "landmarks_metadata.pkl"
+LANDMARKS_DIR_METADATA_JSON = LANDMARKS_DIR + "landmarks_metadata.json"
+GESTURE_MODEL_METADATA_PATH = MODELS_TRAINED_DIR + "/gesture_model_metadata.pkl"
 
 # Gesture recognizer model hyperparameters
 DEFAULT_SEQUENCE_LENGTH = 30

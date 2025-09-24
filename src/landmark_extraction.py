@@ -10,6 +10,8 @@ from datetime import datetime
 
 from constants import (
     LANDMARKS_DIR,
+    LANDMARKS_DIR_METADATA_JSON,
+    LANDMARKS_DIR_METADATA_PKL,
     MEDIAPIPE_HAND_LANDMARKER_PATH,
     MEDIAPIPE_POSE_LANDMARKER_PATH,
     VIDEOS_DIR,
@@ -251,7 +253,7 @@ class LandmarkExtractor:
                         }
                     )
 
-    def save_metadata(self, landmarks_path):
+    def save_metadata(self):
         """
         Save processing metadata to both pickle and JSON files
         """
@@ -272,17 +274,15 @@ class LandmarkExtractor:
         )
 
         # Save as pickle
-        metadata_pkl_path = os.path.join(landmarks_path, "landmarks_metadata.pkl")
-        with open(metadata_pkl_path, "wb") as f:
+        with open(LANDMARKS_DIR_METADATA_PKL, "wb") as f:
             pickle.dump(self.processing_metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         # Save as JSON
-        metadata_json_path = os.path.join(landmarks_path, "landmarks_metadata.json")
-        with open(metadata_json_path, "w") as f:
+        with open(LANDMARKS_DIR_METADATA_JSON, "w") as f:
             json.dump(self.processing_metadata, f, indent=2)
 
-        print(f"Saved metadata to: {metadata_pkl_path}")
-        print(f"Saved metadata to: {metadata_json_path}")
+        print(f"Saved metadata to: {LANDMARKS_DIR_METADATA_PKL}")
+        print(f"Saved metadata to: {LANDMARKS_DIR_METADATA_JSON}")
 
 
 def main():

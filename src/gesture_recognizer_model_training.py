@@ -20,6 +20,8 @@ from constants import (
     DEFAULT_HIDDEN_SIZE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_SEQUENCE_LENGTH,
+    GESTURE_MODEL_METADATA_PATH,
+    GESTURE_MODEL_PATH,
     LANDMARKS_DIR,
     MODELS_TRAINED_DIR,
 )
@@ -294,7 +296,7 @@ class ModelTrainer:
                         "val_accuracy": val_acc,
                         "train_accuracy": train_acc,
                     },
-                    os.path.join(MODELS_TRAINED_DIR, "best_model.pth"),
+                    GESTURE_MODEL_PATH,
                 )
                 print(
                     f"New best model saved with validation accuracy: {best_val_acc:.4f}"
@@ -461,7 +463,7 @@ def main():
     trainer.train(train_loader, val_loader, args.epochs, args.learning_rate)
     trainer.plot_training_history()
 
-    checkpoint = torch.load(os.path.join(MODELS_TRAINED_DIR, "best_model.pth"))
+    checkpoint = torch.load(GESTURE_MODEL_PATH)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     evaluate_model(model, test_loader, class_names, trainer.device)
@@ -475,7 +477,7 @@ def main():
         "dropout": args.dropout,
     }
 
-    with open(os.path.join(MODELS_TRAINED_DIR, "model_info.pkl"), "wb") as f:
+    with open(GESTURE_MODEL_METADATA_PATH, "wb") as f:
         pickle.dump(model_info, f)
 
     print("Training completed successfully!")
