@@ -2,315 +2,310 @@ import os
 import pickle
 import numpy as np
 import torch
-import random
+import argparse
 from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog
+import cv2
 
-from constants import LANDMARKS_DIR, MODELS_TRAINED_DIR, SEQ2SEQ_CONFIG, OUTPUT_DIR
-from seq2seq_model_training import LSTMGenerator, LandmarkProcessor
+from constants import LANDMARKS_DIR, MODELS_TRAINED_DIR
+from seq2seq_model_training import GestureTransformer, LandmarkProcessor
+from landmark_visualization import LandmarkVisualizer
 
 
-class InferenceVisualizer:
-    """Generate transition sequences for visualization"""
+class GestureTransitionCreator:
+    """Creates smooth transitions between gesture sequences"""
 
-    def __init__(self, models_dir=MODELS_TRAINED_DIR):
-        self.models_dir = models_dir
+    def __init__(self, model_dir: str = MODELS_TRAINED_DIR):
+        self.model_dir = Path(model_dir)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load processor and models
+        # Load components
         self.processor = self._load_processor()
-        self.generator = self._load_generator()
-
-        print(f"Inference visualizer ready on {self.device}")
+        self.model = self._load_model()
 
     def _load_processor(self):
-        """Load the trained landmark processor"""
-        processor_path = os.path.join(self.models_dir, "processor.pkl")
-
-        if not os.path.exists(processor_path):
-            print(f"Warning: Processor not found at {processor_path}")
-            print("Creating new processor...")
-            processor = LandmarkProcessor()
-            processor.fit_scaler_on_sample(LANDMARKS_DIR)
-            return processor
-
+        """Load the saved processor"""
+        processor_path = self.model_dir / "processor.pkl"
         with open(processor_path, "rb") as f:
             processor = pickle.load(f)
-
         print(f"Loaded processor from {processor_path}")
         return processor
 
-    def _load_generator(self):
-        """Load the trained generator model"""
-        generator_path = os.path.join(self.models_dir, "lstm_generator.pth")
-        config_path = os.path.join(self.models_dir, "gan_config.pkl")
-
-        if not os.path.exists(generator_path):
-            raise FileNotFoundError(f"Generator model not found at {generator_path}")
-
+    def _load_model(self):
+        """Load the trained model"""
         # Load config
-        if os.path.exists(config_path):
-            with open(config_path, "rb") as f:
-                config = pickle.load(f)
-        else:
-            print("Using default config")
-            config = SEQ2SEQ_CONFIG
+        config_path = self.model_dir / "config.json"
+        with open(config_path, "r") as f:
+            import json
 
-        # Create and load generator
-        generator = LSTMGenerator(
-            feature_dim=self.processor.total_features,
-            hidden_dim=config["hidden_dim"],
-            num_layers=config["num_layers"],
+            config = json.load(f)
+
+        # Create model
+        model = GestureTransformer(
+            feature_dim=config["feature_dim"],
+            d_model=config.get("d_model", 256),
+            nhead=config.get("nhead", 8),
+            num_encoder_layers=config.get("num_encoder_layers", 4),
+            num_decoder_layers=config.get("num_decoder_layers", 4),
         )
 
-        generator.load_state_dict(torch.load(generator_path, map_location=self.device))
-        generator.to(self.device)
-        generator.eval()
+        # Load weights
+        model_path = self.model_dir / "best_model.pth"
+        if not model_path.exists():
+            model_path = self.model_dir / "final_transformer_model.pth"
 
-        print(f"Loaded generator from {generator_path}")
-        return generator
+        checkpoint = torch.load(
+            model_path, map_location=self.device, weights_only=False
+        )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.to(self.device)
+        model.eval()
 
-    def get_landmark_files(self, max_files=200):
-        """Get available landmark files"""
-        landmark_files = []
-        landmarks_path = Path(LANDMARKS_DIR)
+        print(f"Loaded model from {model_path}")
+        return model
 
-        if not landmarks_path.exists():
-            raise ValueError(f"Landmarks directory not found: {LANDMARKS_DIR}")
+    def select_files(self):
+        """Select two gesture files"""
+        root = tk.Tk()
+        root.withdraw()
 
-        for folder in landmarks_path.iterdir():
-            if folder.is_dir():
-                pkl_files = list(folder.glob("*_landmarks.pkl"))
-                landmark_files.extend(pkl_files)
+        first_file = filedialog.askopenfilename(
+            title="Select FIRST gesture",
+            filetypes=[("Pickle files", "*.pkl")],
+            initialdir=LANDMARKS_DIR,
+        )
 
-        # Limit files for manageable processing
-        if len(landmark_files) > max_files:
-            landmark_files = random.sample(landmark_files, max_files)
-
-        print(f"Found {len(landmark_files)} landmark files for inference")
-        return landmark_files
-
-    def load_file_frames(self, pkl_file):
-        """Load and process frames from a landmark file"""
-        try:
-            with open(pkl_file, "rb") as f:
-                landmark_data = pickle.load(f)
-
-            frames = landmark_data.get("frames", [])
-
-            # Convert all frames to features
-            processed_frames = []
-            for frame_data in frames:
-                features = self.processor.extract_frame_features(frame_data)
-                normalized = self.processor.normalize_features(features)
-                processed_frames.append(normalized)
-
-            return processed_frames, landmark_data
-
-        except Exception as e:
-            print(f"Error loading {pkl_file}: {e}")
+        if not first_file:
             return None, None
 
-    def generate_transition(self, start_frame, end_frame):
-        """Generate transition sequence between two frames"""
+        second_file = filedialog.askopenfilename(
+            title="Select SECOND gesture",
+            filetypes=[("Pickle files", "*.pkl")],
+            initialdir=os.path.dirname(first_file),
+        )
+
+        root.destroy()
+        return first_file, second_file
+
+    def load_gesture(self, file_path: str):
+        """Load gesture and extract features"""
+        with open(file_path, "rb") as f:
+            landmark_data = pickle.load(f)
+
+        # Extract features from all frames
+        features = []
+        for frame_data in landmark_data["frames"]:
+            frame_features = self.processor.extract_features(frame_data)
+            normalized = self.processor.normalize_features(frame_features)
+            features.append(normalized)
+
+        return np.array(features), landmark_data
+
+    def generate_transition(self, first_seq, second_seq, length=6):
+        """Generate transition between sequences"""
+        start_frame = torch.FloatTensor(first_seq[-1]).unsqueeze(0).to(self.device)
+        end_frame = torch.FloatTensor(second_seq[0]).unsqueeze(0).to(self.device)
+
         with torch.no_grad():
-            start_tensor = torch.FloatTensor(start_frame).unsqueeze(0).to(self.device)
-            end_tensor = torch.FloatTensor(end_frame).unsqueeze(0).to(self.device)
+            transition = self.model.generate_sequence(start_frame, end_frame, length)
 
-            # Generate 7-frame sequence (start + 5 generated + end)
-            generated_sequence = self.generator(start_tensor, end_tensor)
+        return transition.cpu().numpy().squeeze()
 
-            return generated_sequence.cpu().numpy()[0]  # Remove batch dimension
-
-    def create_transition_file(
-        self,
-        file_a_path,
-        file_b_path,
-        frames_a,
-        frames_b,
-        landmark_data_a,
-        landmark_data_b,
+    def create_combined_sequence(
+        self, first_seq, transition, second_seq, template_data
     ):
-        """Create transition sequence from file A to file B"""
+        """Create combined landmark data"""
+        # Combine sequences (avoid duplicate frames)
+        combined_features = np.concatenate(
+            [
+                first_seq[:-1],  # All but last
+                transition,  # Generated transition
+                second_seq[1:],  # All but first
+            ]
+        )
 
-        # Get 3rd-to-last frame from file A (transition start point)
-        if len(frames_a) < 3:
-            return None
-        start_frame_idx = len(frames_a) - 3
-        start_frame = frames_a[start_frame_idx]
+        # Convert back to landmark format
+        combined_data = template_data.copy()
+        combined_data["frames"] = []
+        combined_data["video_path"] = "generated_transition"
 
-        # Get 3rd frame from file B (transition end point)
-        if len(frames_b) < 3:
-            return None
-        end_frame_idx = 2  # 3rd frame (0-indexed)
-        end_frame = frames_b[end_frame_idx]
+        for i, features in enumerate(combined_features):
+            frame_data = {"frame_number": i}
 
-        # Generate transition
-        generated_transition = self.generate_transition(start_frame, end_frame)
+            # Convert features back to hand landmarks only
+            frame_data["hands"] = self._features_to_hands(features)
 
-        # Build complete sequence: start_of_A -> ... -> 3rd_last_A -> generated_transition -> 3rd_B -> ... -> end_of_B
-        complete_sequence = []
+            combined_data["frames"].append(frame_data)
 
-        # Add frames from A up to and including the transition start
-        complete_sequence.extend(frames_a[: start_frame_idx + 1])
+        return combined_data
 
-        # Add generated transition (excluding start and end frames to avoid duplication)
-        complete_sequence.extend(generated_transition[1:-1])  # Only middle 5 frames
+    def _features_to_hands(self, features):
+        """Convert features to hand landmarks (126 features = 2 hands * 21 landmarks * 3 coords)"""
+        hands = []
 
-        # Add frames from B starting from the transition end
-        complete_sequence.extend(frames_b[end_frame_idx:])
+        for hand_idx in range(2):  # Max 2 hands
+            start = hand_idx * 63  # 21 landmarks * 3 coords
+            end = start + 63
 
-        # Create the output data structure
-        transition_data = {
-            "video_path": f"transition_{file_a_path.stem}_to_{file_b_path.stem}",
-            "timestamp": f"generated_transition",
-            "frames": [],
-            "connections": landmark_data_a.get("connections", {}),
-            "feature_info": landmark_data_a.get("feature_info", {}),
-            "transition_info": {
-                "source_file_a": str(file_a_path),
-                "source_file_b": str(file_b_path),
-                "transition_start_frame": start_frame_idx,
-                "transition_end_frame": end_frame_idx,
-                "generated_frames": 5,
-                "total_frames": len(complete_sequence),
-            },
-        }
+            hand_data = features[start:end]
+            landmarks = []
 
-        # Convert feature vectors back to frame format (this is approximate)
-        for i, frame_features in enumerate(complete_sequence):
-            # Create a dummy frame structure - your visualization script should handle this
-            frame_data = {
-                "frame_number": i,
-                "hands": [],
-                "pose": None,
-                "connection_features": {"hands": [], "pose": []},
-                "is_generated": start_frame_idx
-                < i
-                < start_frame_idx + 1 + 5,  # Mark generated frames
-                "features": frame_features.tolist(),  # Raw features for debugging
-            }
-            transition_data["frames"].append(frame_data)
+            for lm_idx in range(21):
+                lm_start = lm_idx * 3
+                lm_end = lm_start + 3
+                landmarks.append(hand_data[lm_start:lm_end].tolist())
 
-        return transition_data
-
-    def generate_visualizations(self, num_transitions=100, output_dir=OUTPUT_DIR):
-        """Generate transition visualizations"""
-
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
-        print(f"Creating visualizations in {output_dir}")
-
-        # Get landmark files
-        landmark_files = self.get_landmark_files(max_files=150)
-
-        if len(landmark_files) < 2:
-            print("Need at least 2 landmark files to create transitions")
-            return
-
-        successful_transitions = 0
-        attempts = 0
-
-        while (
-            successful_transitions < num_transitions and attempts < num_transitions * 3
-        ):
-            attempts += 1
-
-            # Randomly select two different files
-            file_a, file_b = random.sample(landmark_files, 2)
-
-            # Load frames from both files
-            frames_a, landmark_data_a = self.load_file_frames(file_a)
-            frames_b, landmark_data_b = self.load_file_frames(file_b)
-
-            if frames_a is None or frames_b is None:
-                continue
-
-            if len(frames_a) < 5 or len(frames_b) < 5:  # Need minimum frames
-                continue
-
-            # Create transition
-            try:
-                transition_data = self.create_transition_file(
-                    file_a, file_b, frames_a, frames_b, landmark_data_a, landmark_data_b
+            # Only add hand if it has non-zero landmarks
+            if np.any(np.array(landmarks) != 0):
+                hands.append(
+                    {
+                        "hand_index": hand_idx,
+                        "handedness": "Left" if hand_idx == 0 else "Right",
+                        "landmarks": landmarks,
+                    }
                 )
 
-                if transition_data is None:
-                    continue
+        return hands
 
-                # Save transition file
-                output_filename = f"{file_a.stem}_to_{file_b.stem}_transition.pkl"
-                output_path = os.path.join(output_dir, output_filename)
+    def save_and_visualize(self, combined_data, first_file, second_file):
+        """Save combined sequence and launch visualizer"""
+        # Create output path
+        output_dir = Path(LANDMARKS_DIR) / "transitions"
+        output_dir.mkdir(exist_ok=True)
 
-                with open(output_path, "wb") as f:
-                    pickle.dump(transition_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        first_name = Path(first_file).stem.replace("_landmarks", "")
+        second_name = Path(second_file).stem.replace("_landmarks", "")
+        output_file = output_dir / f"transition_{first_name}_to_{second_name}.pkl"
 
-                successful_transitions += 1
+        # Save
+        with open(output_file, "wb") as f:
+            pickle.dump(combined_data, f)
 
-                if successful_transitions % 10 == 0:
-                    print(
-                        f"Generated {successful_transitions}/{num_transitions} transitions"
+        print(f"Saved transition to: {output_file}")
+        print(f"Total frames: {len(combined_data['frames'])}")
+
+        # Launch visualizer
+        self._launch_visualizer(str(output_file))
+
+        return str(output_file)
+
+    def _launch_visualizer(self, file_path):
+        """Launch visualization"""
+        visualizer = LandmarkVisualizer()
+
+        print(f"\nShowing transition visualization...")
+        print("Controls: SPACE=play/pause, N=next, P=prev, Q=quit")
+
+        # Load the file
+        all_data = visualizer.load_landmarks_data([file_path])
+        if not all_data:
+            print("Could not load visualization data")
+            return
+
+        current_frame = 0
+        playing = True
+        data = all_data[0]["data"]
+        total_frames = len(data["frames"])
+
+        while True:
+            if total_frames > 0:
+                current_frame = max(0, min(current_frame, total_frames - 1))
+                frame_data = data["frames"][current_frame]
+
+                vis_frame = visualizer.create_visualization_frame(
+                    frame_data,
+                    filename=f"Transition - Frame {current_frame + 1}/{total_frames}",
+                )
+
+                if playing:
+                    cv2.putText(
+                        vis_frame,
+                        "PLAYING",
+                        (500, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 255, 0),
+                        2,
                     )
 
-            except Exception as e:
-                print(f"Error creating transition {file_a.stem} -> {file_b.stem}: {e}")
-                continue
+                cv2.imshow("Gesture Transition", vis_frame)
 
-        print(
-            f"\nGenerated {successful_transitions} transition visualizations in {output_dir}"
+            key = cv2.waitKey(100 if playing else 0) & 0xFF
+
+            if key in [ord("q"), ord("Q"), 27]:
+                break
+            elif key == ord(" "):
+                playing = not playing
+            elif key in [ord("n"), ord("N")]:
+                current_frame = min(current_frame + 1, total_frames - 1)
+            elif key in [ord("p"), ord("P")]:
+                current_frame = max(current_frame - 1, 0)
+
+            if playing:
+                current_frame = (current_frame + 1) % total_frames
+
+        cv2.destroyAllWindows()
+
+    def create_transition(self, first_file=None, second_file=None, transition_length=6):
+        """Main method to create transition"""
+        # Select files if not provided
+        if not first_file or not second_file:
+            first_file, second_file = self.select_files()
+            if not first_file or not second_file:
+                print("No files selected")
+                return
+
+        print(f"Creating transition between:")
+        print(f"  First: {os.path.basename(first_file)}")
+        print(f"  Second: {os.path.basename(second_file)}")
+
+        # Load gestures
+        first_features, first_data = self.load_gesture(first_file)
+        second_features, second_data = self.load_gesture(second_file)
+
+        print(f"Loaded sequences:")
+        print(f"  First: {first_features.shape[0]} frames")
+        print(f"  Second: {second_features.shape[0]} frames")
+
+        # Generate transition
+        print(f"Generating {transition_length}-frame transition...")
+        transition = self.generate_transition(
+            first_features, second_features, transition_length
         )
-        print(f"Files are named: [source_file]_to_[target_file]_transition.pkl")
 
-        # Create a summary file
-        summary = {
-            "total_transitions": successful_transitions,
-            "output_directory": output_dir,
-            "generated_frames_per_transition": 5,
-            "model_used": "LSTM-GAN",
-            "timestamp": str(np.datetime64("now")),
-            "files": [
-                f for f in os.listdir(output_dir) if f.endswith("_transition.pkl")
-            ],
-        }
+        # Create combined sequence
+        combined_data = self.create_combined_sequence(
+            first_features, transition, second_features, first_data
+        )
 
-        summary_path = os.path.join(output_dir, "transitions_summary.json")
-        import json
+        # Save and visualize
+        output_path = self.save_and_visualize(combined_data, first_file, second_file)
 
-        with open(summary_path, "w") as f:
-            json.dump(summary, f, indent=2)
-
-        return successful_transitions
+        print(f"\nTransition complete!")
+        print(f"Combined sequence: {len(combined_data['frames'])} frames")
+        print(f"Saved to: {output_path}")
 
 
 def main():
-    """Generate inference visualizations"""
-    print("=== GAN Inference Visualization Generator ===")
+    parser = argparse.ArgumentParser(description="Create gesture transitions")
+    parser.add_argument("--first", help="First gesture file")
+    parser.add_argument("--second", help="Second gesture file")
+    parser.add_argument("--length", type=int, default=6, help="Transition length")
+
+    args = parser.parse_args()
+
+    print("=== Gesture Transition Creator ===")
 
     try:
-        # Create visualizer
-        visualizer = InferenceVisualizer()
-
-        # Generate transitions
-        num_generated = visualizer.generate_visualizations(num_transitions=100)
-
-        if num_generated > 0:
-            print(f"\n✅ Successfully generated {num_generated} transition sequences!")
-            print(f"📁 Output directory: {OUTPUT_DIR}")
-            print(
-                f"📊 Each file contains: original_sequence + 5_generated_frames + target_sequence"
-            )
-            print(f"🎬 Use your existing visualization script to view the transitions")
-        else:
-            print(
-                "❌ No transitions were generated. Check your landmark files and trained models."
-            )
-
+        creator = GestureTransitionCreator()
+        creator.create_transition(args.first, args.second, args.length)
     except Exception as e:
         print(f"Error: {e}")
-        print("Make sure you have:")
-        print("1. Trained models in MODELS_TRAINED_DIR")
-        print("2. Landmark files in LANDMARKS_DIR")
-        print("3. Proper directory permissions")
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())

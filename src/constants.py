@@ -17,7 +17,6 @@ MEDIAPIPE_POSE_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR / "pose_landmarker_lite.t
 
 # Metadata Paths
 LANDMARKS_DIR_METADATA_PKL = LANDMARKS_DIR / "landmarks_metadata.pkl"
-LANDMARKS_DIR_METADATA_JSON = LANDMARKS_DIR / "landmarks_metadata.json"
 GESTURE_MODEL_METADATA_PATH = MODELS_TRAINED_DIR / "gesture_model_metadata.pkl"
 
 # Gesture recognizer model hyperparameters

@@ -5,12 +5,10 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import pickle
 import argparse
-import json
 from datetime import datetime
 
 from constants import (
     LANDMARKS_DIR,
-    LANDMARKS_DIR_METADATA_JSON,
     LANDMARKS_DIR_METADATA_PKL,
     MEDIAPIPE_HAND_LANDMARKER_PATH,
     MEDIAPIPE_POSE_LANDMARKER_PATH,
@@ -217,6 +215,7 @@ class LandmarkExtractor:
         print(f"Landmark types: {self.landmark_types}")
 
         video_folders = os.listdir(videos_path)
+        video_folders.sort()
 
         for folder_num in video_folders:
             folder_path = os.path.join(videos_path, str(folder_num))
@@ -273,12 +272,7 @@ class LandmarkExtractor:
         with open(LANDMARKS_DIR_METADATA_PKL, "wb") as f:
             pickle.dump(self.processing_metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        # Save as JSON
-        with open(LANDMARKS_DIR_METADATA_JSON, "w") as f:
-            json.dump(self.processing_metadata, f, indent=2)
-
         print(f"Saved metadata to: {LANDMARKS_DIR_METADATA_PKL}")
-        print(f"Saved metadata to: {LANDMARKS_DIR_METADATA_JSON}")
 
 
 def main():
@@ -327,7 +321,7 @@ def main():
     extractor.process_video_folder(args.videos_dir, args.output_dir)
 
     # Save metadata files
-    extractor.save_metadata(args.output_dir)
+    extractor.save_metadata()
 
     print("Landmark extraction complete!")
 

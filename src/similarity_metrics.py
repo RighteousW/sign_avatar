@@ -4,10 +4,6 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial.distance import euclidean
 from scipy.stats import wasserstein_distance
-import warnings
-
-warnings.filterwarnings("ignore")
-
 
 class GestureSequenceSimilarityMetrics:
     """Comprehensive similarity metrics specifically for gesture landmark sequences"""
