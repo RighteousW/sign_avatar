@@ -572,7 +572,7 @@ class AudioToGlossesConverter:
 
 def main():
     root = tk.Tk()
-    app = AudioToGlossesConverter(root)
+    _ = AudioToGlossesConverter(root)
     root.mainloop()
 
 

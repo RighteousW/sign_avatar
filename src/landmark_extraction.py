@@ -196,6 +196,7 @@ class LandmarkExtractor:
         self.processing_metadata["total_frames"] += frame_count
 
         return landmarks_data
+    
     def process_video_folder(self, videos_path, landmarks_path):
         """
         Process all videos in the folder structure and save landmarks

@@ -6,7 +6,7 @@ from tkinter import filedialog
 import tkinter as tk
 import mediapipe as mp
 
-from constants import LANDMARKS_DIR
+from constants import ROOT_DIR
 
 
 class LandmarkVisualizer:
@@ -40,7 +40,7 @@ class LandmarkVisualizer:
         file_paths = filedialog.askopenfilenames(
             title="Select landmark pickle files",
             filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
-            initialdir=LANDMARKS_DIR if os.path.exists(LANDMARKS_DIR) else ".",
+            initialdir=ROOT_DIR if os.path.exists(ROOT_DIR) else ".",
         )
 
         root.destroy()
