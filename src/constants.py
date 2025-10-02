@@ -18,6 +18,7 @@ MEDIAPIPE_POSE_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR / "pose_landmarker_lite.t
 # Metadata Paths
 LANDMARKS_DIR_METADATA_PKL = LANDMARKS_DIR / "landmarks_metadata.pkl"
 GESTURE_MODEL_METADATA_PATH = MODELS_TRAINED_DIR / "gesture_model_metadata.pkl"
+REPRESENTATIVES_LEFT = OUTPUT_DIR / "gesture_metadata" / "representatives_left.json"
 
 # Gesture recognizer model hyperparameters
 DEFAULT_SEQUENCE_LENGTH = 30
