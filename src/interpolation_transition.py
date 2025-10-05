@@ -446,13 +446,17 @@ class GestureTransitionGenerator:
         print(f"Transition length: {transition_length} frames")
 
         # Validate all glosses exist
+        denied_glosses = []
+        allowed_glosses = []
         for gloss in gloss_sequence:
             if gloss not in self.representatives:
-                raise ValueError(f"Gloss '{gloss}' not found in representatives")
+                denied_glosses.append(gloss)
+            else:
+                allowed_glosses.append(gloss)
 
         # Load all gesture data
         gesture_data = []
-        for gloss in gloss_sequence:
+        for gloss in allowed_glosses:
             rep_info = self.representatives[gloss]
             file_path = rep_info["file_path"]
 
@@ -559,6 +563,7 @@ class GestureTransitionGenerator:
                 "gesture_count": len(gloss_sequence),
                 "transition_count": len(gloss_sequence) - 1,
             },
+            "denied_glosses": denied_glosses,
         }
 
         # Save if output path provided
@@ -611,7 +616,9 @@ def main():
 
     elif args.command == "generate":
         generator = GestureTransitionGenerator(args.metadata)
-        generator.generate_sequence(args.glosses, args.transition_length, args.output)
+        demied_glosses = generator.generate_sequence(args.glosses, args.transition_length, args.output)["denied_glosses"]
+        if demied_glosses:
+            print(f"Denied glosses (not found): {', '.join(demied_glosses)}")
 
     else:
         parser.print_help()
