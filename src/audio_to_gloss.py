@@ -6,7 +6,17 @@ Converts English audio/text to NSL gloss notation following NSL grammar rules.
 The converter follows NSL structure: TIME - LOCATION - SUBJECT - OBJECT -
 ADJECTIVE - VERB - NEGATION - QUESTION
 
-Following: Morgan, Ruth; Liddell, Scott; Haikali, Marius M.N.; Ashipala, Sackeus P.; Daniel, Polo; Haiduwah, Hilifilua
+Following: 
+1. @inproceedings{moryossef2023baseline,
+  title={An Open-Source Gloss-Based Baseline for Spoken to Signed Language Translation},
+  author={Moryossef, Amit and M{\"u}ller, Mathias and G{\"o}hring, Anne and Jiang, Zifan and Goldberg, Yoav and Ebling, Sarah},
+  booktitle={2nd International Workshop on Automatic Translation for Signed and Spoken Languages (AT4SSL)},
+  year={2023},
+  month={June},
+  url={https://github.com/ZurichNLP/spoken-to-signed-translation},
+  note={Available at: \url{https://arxiv.org/abs/2305.17714}}
+}
+2. Morgan, Ruth; Liddell, Scott; Haikali, Marius M.N.; Ashipala, Sackeus P.; Daniel, Polo; Haiduwah, Hilifilua
 E.T.; Hashiyana, Rauna Ndeshihafela; Israel, Nangolo Jeremia; Linus, Festus Tshikuku; Niilenge, Henock
 Hango; and Setzer, Paul, "Namibian Sign Language to English and Oshiwambo" (1991). Namibian Sign
 Language to English and Oshiwambo. 1 Front matter xxi-xxviii.
