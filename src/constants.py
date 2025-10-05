@@ -6,7 +6,7 @@ DATA_DIR = ROOT_DIR / "data"
 VIDEOS_DIR = DATA_DIR / "videos"
 OUTPUT_DIR = ROOT_DIR / "output"
 LANDMARKS_DIR = DATA_DIR / "landmarks"
-MODELS_DIR = ROOT_DIR / "models"
+MODELS_DIR = DATA_DIR / "models"
 MODELS_DEPENDENCY_DIR = MODELS_DIR / "dependencies"
 MODELS_TRAINED_DIR = MODELS_DIR / "trained_models"
 

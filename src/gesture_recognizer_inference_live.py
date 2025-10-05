@@ -133,22 +133,8 @@ class MediaPipeLandmarkExtractor:
         self.last_frame_time = time.time()
         self.expected_fps = 30
         self.frame_drop_threshold = 1.5 / self.expected_fps  # 1.5x expected frame time
-
-    def should_process_frame(self) -> bool:
-        """Determine if current frame should be processed by MediaPipe"""
-        if self.skip_processing == 0:
-            return True  # Process all frames
-
-        self.frame_counter += 1
-
-        if self.skip_processing == 1:
-            # Process every other frame (0, 2, 4, 6, ...)
-            return self.frame_counter % 2 == 1
-        elif self.skip_processing == 2:
-            # Process every third frame (0, 3, 6, 9, ...)
-            return self.frame_counter % 3 == 1
-
-        return True
+        self.frame_buffer = []  # Buffer for interpolation
+        self.last_processed_features = None
 
     def interpolate_features(self) -> np.ndarray:
         """Interpolate features based on recent processed frames"""
@@ -228,59 +214,92 @@ class MediaPipeLandmarkExtractor:
         # Return True if frame time is significantly longer than expected
         return time_diff > self.frame_drop_threshold
 
-    def process_frame(self, frame) -> Tuple[np.ndarray, Dict, bool]:
-        """Process frame and extract features, with optional MediaPipe skipping"""
 
+    def process_frame(self, frame) -> List[Tuple[np.ndarray, Dict, bool]]:
+        """
+        Process frame and return list of features (processed + interpolated).
+        Returns multiple feature sets when interpolation occurs.
+        """
         frame_dropped = self.detect_frame_drops()
+        self.frame_counter += 1
+        should_process = self._should_process_current_frame()
 
-        if self.should_process_frame():
-            # Process with MediaPipe (expensive operation)
+        if should_process:
+            # Process with MediaPipe
             mp_image = mp.Image(
                 image_format=mp.ImageFormat.SRGB,
                 data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
             )
 
-            hand_result = self.hand_landmarker.detect_for_video(
-                mp_image, self.timestamp_ms
-            )
-            pose_result = self.pose_landmarker.detect_for_video(
-                mp_image, self.timestamp_ms
-            )
+            frame_data = {"hands": [], "pose": None}
+
+            # Only run hand detection if model uses it
+            if self.feature_info["hand_landmarks"] > 0:
+                hand_result = self.hand_landmarker.detect_for_video(
+                    mp_image, self.timestamp_ms
+                )
+                if hand_result and hand_result.hand_landmarks:
+                    for i, hand_landmarks in enumerate(hand_result.hand_landmarks):
+                        landmarks = [[lm.x, lm.y, lm.z] for lm in hand_landmarks]
+                        frame_data["hands"].append({"landmarks": landmarks})
+
+            # Only run pose detection if model uses it
+            if self.feature_info["pose_landmarks"] > 0:
+                pose_result = self.pose_landmarker.detect_for_video(
+                    mp_image, self.timestamp_ms
+                )
+                if pose_result and pose_result.pose_landmarks:
+                    pose_landmarks = pose_result.pose_landmarks[0]
+                    landmarks = [
+                        [lm.x, lm.y, lm.z, getattr(lm, "visibility", 0.0)]
+                        for lm in pose_landmarks
+                    ]
+                    frame_data["pose"] = {"landmarks": landmarks}
+
             self.timestamp_ms += 1
 
-            frame_data = {"hands": [], "pose": None}
+            current_features = self.extract_features_from_frame(frame_data)
 
-            # Process hand results
-            if hand_result and hand_result.hand_landmarks:
-                for i, hand_landmarks in enumerate(hand_result.hand_landmarks):
-                    landmarks = [[lm.x, lm.y, lm.z] for lm in hand_landmarks]
-                    frame_data["hands"].append({"landmarks": landmarks})
+            # Now interpolate for buffered frames
+            results = []
 
-            # Process pose results
-            if pose_result and pose_result.pose_landmarks:
-                pose_landmarks = pose_result.pose_landmarks[0]
-                landmarks = [
-                    [lm.x, lm.y, lm.z, getattr(lm, "visibility", 0.0)]
-                    for lm in pose_landmarks
-                ]
-                frame_data["pose"] = {"landmarks": landmarks}
+            if self.last_processed_features is not None and len(self.frame_buffer) > 0:
+                # Interpolate between last_processed and current
+                num_skipped = len(self.frame_buffer)
 
-            # Extract features using training logic
-            features = self.extract_features_from_frame(frame_data)
+                for i in range(num_skipped):
+                    # Linear interpolation
+                    weight = (i + 1) / (num_skipped + 1)
+                    interpolated = (
+                        1 - weight
+                    ) * self.last_processed_features + weight * current_features
+                    results.append(
+                        (interpolated, {"hands": [], "pose": None}, frame_dropped)
+                    )
 
-            # Store for future interpolation
-            self.recent_features.append(features)
+            # Add current processed frame
+            results.append((current_features, frame_data, frame_dropped))
 
-            return features, frame_data, frame_dropped
+            # Update state
+            self.last_processed_features = current_features
+            self.recent_features.append(current_features)
+            self.frame_buffer = []
+
+            return results
 
         else:
-            # Skip MediaPipe processing, use interpolation
-            interpolated_features = self.interpolate_features_advanced()
-
-            # Create empty frame_data since we didn't process
-            frame_data = {"hands": [], "pose": None}
-
-            return interpolated_features, frame_data, frame_dropped
+            # Buffer this frame for later interpolation
+            self.frame_buffer.append(frame)
+            return []  # No features yet, waiting for next processed frame
+    
+    def _should_process_current_frame(self) -> bool:
+        if self.skip_processing == 0:
+            return True
+        elif self.skip_processing == 1:
+            return self.frame_counter % 2 == 1
+        elif self.skip_processing == 2:
+            return self.frame_counter % 3 == 1
+        return True
 
 
 class MultiModelInferenceSystem:
@@ -288,7 +307,6 @@ class MultiModelInferenceSystem:
 
     def __init__(
         self,
-        model_dir,
         hand_model_path,
         pose_model_path,
         confidence_threshold=0.7,
@@ -683,18 +701,16 @@ class MultiModelInferenceSystem:
 
             # Process frame
             process_start = time.time()
-            features, frame_data, frame_dropped = self.landmark_extractor.process_frame(
-                frame
-            )
+            feature_list = self.landmark_extractor.process_frame(frame)
             process_time = time.time() - process_start
             processing_times.append(process_time)
 
-            # Track frame drops
-            self.recent_frame_drops.append(frame_dropped)
-            if frame_dropped:
-                self.frame_drop_count += 1
-
-            self.feature_queue.append(features)
+            # Add features to queue
+            for features, frame_data, frame_dropped in feature_list:
+                self.feature_queue.append(features)
+                self.recent_frame_drops.append(frame_dropped)
+                if frame_dropped:
+                    self.frame_drop_count += 1
 
             # Run inference when queue is full
             prediction, confidence = None, 0.0
@@ -724,9 +740,7 @@ class MultiModelInferenceSystem:
             avg_process_time = (
                 sum(processing_times) / len(processing_times) if processing_times else 0
             )
-            drop_rate = sum(self.recent_frame_drops) / max(
-                len(self.recent_frame_drops), 1
-            )
+            drop_rate = sum(self.recent_frame_drops) / max(len(self.recent_frame_drops), 1)
             selected_model = self.select_best_model() if self.smart_selection else "N/A"
 
             # Display information including performance
@@ -780,11 +794,6 @@ class MultiModelInferenceSystem:
 def main():
     parser = argparse.ArgumentParser(
         description="Multi-model real-time sign language recognition"
-    )
-    parser.add_argument(
-        "--model_dir",
-        default=MODELS_TRAINED_DIR,
-        help="Directory containing trained models",
     )
     parser.add_argument(
         "--hand_model",
@@ -852,7 +861,6 @@ def main():
 
     # Run inference
     inference_system = MultiModelInferenceSystem(
-        model_dir=args.model_dir,
         hand_model_path=args.hand_model,
         pose_model_path=args.pose_model,
         confidence_threshold=args.confidence_threshold,
