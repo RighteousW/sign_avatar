@@ -47,7 +47,6 @@ def get_metadata_path(skip_pattern: int):
     if skip_pattern not in skip_names:
         return GESTURE_MODEL_METADATA_PATH
     suffix = skip_names[skip_pattern]
-    # Use Path operations instead of string replace
     return (
         GESTURE_MODEL_METADATA_PATH.parent
         / f"{GESTURE_MODEL_METADATA_PATH.stem}_{suffix}{GESTURE_MODEL_METADATA_PATH.suffix}"
