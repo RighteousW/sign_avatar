@@ -1,0 +1,12 @@
+{
+  "input_dim": 5784,
+  "output_dim": 7533,
+  "embedding_size": 256,
+  "hidden_size": 128,
+  "num_layers": 2,
+  "dropout": 0.3,
+  "attention_type": "general",
+  "batch_size": 16,
+  "learning_rate": 0.001,
+  "num_epochs": 10
+}

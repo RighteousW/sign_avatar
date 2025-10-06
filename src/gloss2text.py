@@ -853,42 +853,42 @@ def translate_sentence(model, sentence, gloss_vocab, text_vocab, device, max_len
 
 if __name__ == "__main__":
 
-    # ===== STEP 1: LOAD FULL DATASET =====
-    print("=" * 60)
-    print("GLOSS-TO-TEXT TRANSLATOR WITH ATTENTION")
-    print("=" * 60)
+    # # ===== STEP 1: LOAD FULL DATASET =====
+    # print("=" * 60)
+    # print("GLOSS-TO-TEXT TRANSLATOR WITH ATTENTION")
+    # print("=" * 60)
 
-    print("\n[1/8] Loading ASLG-PC12 dataset...")
+    # print("\n[1/8] Loading ASLG-PC12 dataset...")
     gloss_sequences, text_sequences = load_data_from_file(
         "data/ASLG-PC12 dataset/train.csv", "csv"
     )
     print(f"   Loaded {len(gloss_sequences)} total samples")
 
-    # Split into train/validation (90/10)
+    # # Split into train/validation (90/10)
     split_idx = int(0.9 * len(gloss_sequences))
     train_gloss = gloss_sequences[:split_idx]
     train_text = text_sequences[:split_idx]
     val_gloss = gloss_sequences[split_idx:]
     val_text = text_sequences[split_idx:]
 
-    print(f"   Training samples: {len(train_gloss)}")
-    print(f"   Validation samples: {len(val_gloss)}")
+    # print(f"   Training samples: {len(train_gloss)}")
+    # print(f"   Validation samples: {len(val_gloss)}")
 
-    # ===== STEP 2: BUILD VOCABULARIES =====
-    print("\n[2/8] Building vocabularies...")
+    # # ===== STEP 2: BUILD VOCABULARIES =====
+    # print("\n[2/8] Building vocabularies...")
     gloss_vocab = build_vocab(train_gloss, min_freq=5)
     text_vocab = build_vocab(train_text, min_freq=5)
 
-    print(f"   Gloss vocabulary size: {len(gloss_vocab)}")
-    print(f"   Text vocabulary size: {len(text_vocab)}")
+    # print(f"   Gloss vocabulary size: {len(gloss_vocab)}")
+    # print(f"   Text vocabulary size: {len(text_vocab)}")
 
-    # ===== STEP 3: HARDWARE OPTIMIZATION =====
-    print("\n[3/8] Optimizing for hardware...")
+    # # ===== STEP 3: HARDWARE OPTIMIZATION =====
+    # print("\n[3/8] Optimizing for hardware...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     hw_settings = optimize_for_hardware(device)
 
-    # ===== STEP 4: CONFIGURE MODEL =====
-    print("\n[4/8] Configuring model...")
+    # # ===== STEP 4: CONFIGURE MODEL =====
+    # print("\n[4/8] Configuring model...")
 
     # Optimized config for full dataset on CPU
     HIDDEN_SIZE = 128
@@ -916,28 +916,28 @@ if __name__ == "__main__":
         "num_epochs": NUM_EPOCHS,
     }
 
-    print(f"   Attention type: {config['attention_type']}")
-    print(f"   Hidden size: {config['hidden_size']}")
-    print(f"   Embedding size: {config['embedding_size']}")
-    print(f"   Layers: {config['num_layers']}")
-    print(f"   Batch size: {config['batch_size']}")
-    print(f"   Epochs: {config['num_epochs']}")
+    # print(f"   Attention type: {config['attention_type']}")
+    # print(f"   Hidden size: {config['hidden_size']}")
+    # print(f"   Embedding size: {config['embedding_size']}")
+    # print(f"   Layers: {config['num_layers']}")
+    # print(f"   Batch size: {config['batch_size']}")
+    # print(f"   Epochs: {config['num_epochs']}")
 
-    # ===== STEP 5: CREATE DATASETS AND DATALOADERS =====
-    print("\n[5/8] Creating datasets and dataloaders...")
+    # # ===== STEP 5: CREATE DATASETS AND DATALOADERS =====
+    # print("\n[5/8] Creating datasets and dataloaders...")
 
-    # Training dataset
-    train_dataset = GlossTextDataset(train_gloss, train_text, gloss_vocab, text_vocab)
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=hw_settings["num_workers"],
-        pin_memory=hw_settings["pin_memory"],
-    )
+    # # Training dataset
+    # train_dataset = GlossTextDataset(train_gloss, train_text, gloss_vocab, text_vocab)
+    # train_dataloader = DataLoader(
+    #     train_dataset,
+    #     batch_size=config["batch_size"],
+    #     shuffle=True,
+    #     collate_fn=collate_fn,
+    #     num_workers=hw_settings["num_workers"],
+    #     pin_memory=hw_settings["pin_memory"],
+    # )
 
-    # Validation dataset
+    # # Validation dataset
     val_dataset = GlossTextDataset(val_gloss, val_text, gloss_vocab, text_vocab)
     val_dataloader = DataLoader(
         val_dataset,
@@ -948,11 +948,11 @@ if __name__ == "__main__":
         pin_memory=hw_settings["pin_memory"],
     )
 
-    print(f"   Training batches: {len(train_dataloader)}")
-    print(f"   Validation batches: {len(val_dataloader)}")
+    # print(f"   Training batches: {len(train_dataloader)}")
+    # print(f"   Validation batches: {len(val_dataloader)}")
 
-    # ===== STEP 6: CREATE MODEL =====
-    print("\n[6/8] Creating model...")
+    # # ===== STEP 6: CREATE MODEL =====
+    # print("\n[6/8] Creating model...")
 
     encoder = GRUEncoder(
         config["input_dim"],
@@ -971,113 +971,113 @@ if __name__ == "__main__":
     )
     model = Seq2SeqWithAttention(encoder, decoder, device).to(device)
 
-    # Optimizer and loss
-    optimizer = torch.optim.Adamax(model.parameters(), lr=config["learning_rate"])
-    criterion = nn.CrossEntropyLoss(ignore_index=text_vocab["<PAD>"])
+    # # Optimizer and loss
+    # optimizer = torch.optim.Adamax(model.parameters(), lr=config["learning_rate"])
+    # criterion = nn.CrossEntropyLoss(ignore_index=text_vocab["<PAD>"])
 
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", patience=2, factor=0.5
-    )
+    # # Learning rate scheduler
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer, "min", patience=2, factor=0.5
+    # )
 
-    num_params = sum(p.numel() for p in model.parameters())
-    print(f"   Model parameters: {num_params:,}")
-    print(f"   Model size: ~{num_params * 4 / 1e6:.1f} MB")
+    # num_params = sum(p.numel() for p in model.parameters())
+    # print(f"   Model parameters: {num_params:,}")
+    # print(f"   Model size: ~{num_params * 4 / 1e6:.1f} MB")
 
-    # ===== STEP 7: TRAIN MODEL =====
-    print(f"\n[7/8] Training for {config['num_epochs']} epochs...")
-    print("=" * 60)
+    # # ===== STEP 7: TRAIN MODEL =====
+    # print(f"\n[7/8] Training for {config['num_epochs']} epochs...")
+    # print("=" * 60)
 
-    best_loss = float("inf")
-    best_bleu = 0.0
-    train_start_time = time.time()
+    # best_loss = float("inf")
+    # best_bleu = 0.0
+    # train_start_time = time.time()
 
-    train_losses = []
-    val_losses = []
+    # train_losses = []
+    # val_losses = []
 
-    for epoch in range(config["num_epochs"]):
-        epoch_start_time = time.time()
+    # for epoch in range(config["num_epochs"]):
+    #     epoch_start_time = time.time()
 
-        # Training
-        train_loss = train_epoch(
-            model,
-            train_dataloader,
-            optimizer,
-            criterion,
-            device,
-            teacher_forcing_ratio=0.5,
-            use_amp=hw_settings["use_amp"],
-        )
-        train_losses.append(train_loss)
+    #     # Training
+    #     train_loss = train_epoch(
+    #         model,
+    #         train_dataloader,
+    #         optimizer,
+    #         criterion,
+    #         device,
+    #         teacher_forcing_ratio=0.5,
+    #         use_amp=hw_settings["use_amp"],
+    #     )
+    #     train_losses.append(train_loss)
 
-        # Validation
-        model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for src, trg in val_dataloader:
-                src, trg = src.to(device), trg.to(device)
-                output = model(src, trg, teacher_forcing_ratio=0)
-                output_dim = output.shape[-1]
-                output = output[:, 1:].reshape(-1, output_dim)
-                trg_flat = trg[:, 1:].reshape(-1)
-                loss = criterion(output, trg_flat)
-                val_loss += loss.item()
+    #     # Validation
+    #     model.eval()
+    #     val_loss = 0
+    #     with torch.no_grad():
+    #         for src, trg in val_dataloader:
+    #             src, trg = src.to(device), trg.to(device)
+    #             output = model(src, trg, teacher_forcing_ratio=0)
+    #             output_dim = output.shape[-1]
+    #             output = output[:, 1:].reshape(-1, output_dim)
+    #             trg_flat = trg[:, 1:].reshape(-1)
+    #             loss = criterion(output, trg_flat)
+    #             val_loss += loss.item()
 
-        val_loss = val_loss / len(val_dataloader)
-        val_losses.append(val_loss)
+    #     val_loss = val_loss / len(val_dataloader)
+    #     val_losses.append(val_loss)
 
-        # Update learning rate
-        scheduler.step(val_loss)
+    #     # Update learning rate
+    #     scheduler.step(val_loss)
 
-        epoch_time = time.time() - epoch_start_time
+    #     epoch_time = time.time() - epoch_start_time
 
-        print(
-            f"Epoch {epoch+1}/{config['num_epochs']} | "
-            f"Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f} | "
-            f"Time: {epoch_time:.1f}s"
-        )
+    #     print(
+    #         f"Epoch {epoch+1}/{config['num_epochs']} | "
+    #         f"Train Loss: {train_loss:.4f} | "
+    #         f"Val Loss: {val_loss:.4f} | "
+    #         f"Time: {epoch_time:.1f}s"
+    #     )
 
-        # Save best model based on validation loss
-        if val_loss < best_loss:
-            best_loss = val_loss
-            save_checkpoint(model, optimizer, epoch, val_loss, config, "best_model.pth")
-            print(f"   ✓ New best model saved (val_loss: {val_loss:.4f})")
+    #     # Save best model based on validation loss
+    #     if val_loss < best_loss:
+    #         best_loss = val_loss
+    #         save_checkpoint(model, optimizer, epoch, val_loss, config, "gloss2text.pth")
+    #         print(f"   ✓ New best model saved (val_loss: {val_loss:.4f})")
 
-        # Evaluate BLEU every 2 epochs
-        if (epoch + 1) % 2 == 0:
-            print(f"   Evaluating BLEU score...")
-            eval_results = evaluate_model(
-                model, val_dataloader, gloss_vocab, text_vocab, device
-            )
-            current_bleu = eval_results["bleu_scores"]["BLEU-4"]
-            print(f"   BLEU-4: {current_bleu:.4f} ({current_bleu*100:.2f}%)")
+    #     # Evaluate BLEU every 2 epochs
+    #     if (epoch + 1) % 2 == 0:
+    #         print(f"   Evaluating BLEU score...")
+    #         eval_results = evaluate_model(
+    #             model, val_dataloader, gloss_vocab, text_vocab, device
+    #         )
+    #         current_bleu = eval_results["bleu_scores"]["BLEU-4"]
+    #         print(f"   BLEU-4: {current_bleu:.4f} ({current_bleu*100:.2f}%)")
 
-            if current_bleu > best_bleu:
-                best_bleu = current_bleu
-                save_full_model(
-                    model,
-                    gloss_vocab,
-                    text_vocab,
-                    config,
-                    save_dir="gloss2text_best_bleu",
-                )
-                print(f"   ✓ Best BLEU model saved")
+    #         if current_bleu > best_bleu:
+    #             best_bleu = current_bleu
+    #             save_full_model(
+    #                 model,
+    #                 gloss_vocab,
+    #                 text_vocab,
+    #                 config,
+    #                 save_dir="gloss2text_best_bleu",
+    #             )
+    #             print(f"   ✓ Best BLEU model saved")
 
-    total_train_time = time.time() - train_start_time
-    print(f"\n{'='*60}")
-    print(
-        f"Training completed in {total_train_time:.1f}s ({total_train_time/60:.1f} minutes)"
-    )
-    print(f"Best validation loss: {best_loss:.4f}")
-    print(f"Best BLEU-4 score: {best_bleu:.4f} ({best_bleu*100:.2f}%)")
+    # total_train_time = time.time() - train_start_time
+    # print(f"\n{'='*60}")
+    # print(
+    #     f"Training completed in {total_train_time:.1f}s ({total_train_time/60:.1f} minutes)"
+    # )
+    # print(f"Best validation loss: {best_loss:.4f}")
+    # print(f"Best BLEU-4 score: {best_bleu:.4f} ({best_bleu*100:.2f}%)")
 
     # ===== STEP 8: FINAL EVALUATION =====
     print("\n[8/8] Final evaluation on validation set...")
     print("=" * 60)
 
     # Load best model
-    checkpoint = load_checkpoint("best_model.pth", device)
+    checkpoint = load_checkpoint("gloss2text.pth", device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     eval_results = evaluate_model(
