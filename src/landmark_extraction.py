@@ -179,7 +179,6 @@ class LandmarkExtractor:
                 except Exception as e:
                     print(f"Error extracting pose landmarks from frame {frame_count}: {e}")
 
-            # CRITICAL FIX: Move this INSIDE the while loop
             landmarks_data["frames"].append(frame_data)
             frame_count += 1
 

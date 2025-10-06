@@ -11,13 +11,13 @@ MODELS_DEPENDENCY_DIR = MODELS_DIR / "dependencies"
 MODELS_TRAINED_DIR = MODELS_DIR / "trained_models"
 
 # Model Paths
-GESTURE_MODEL_PATH = MODELS_TRAINED_DIR / "gesture_model.pth"
+GESTURE_MODEL_PATH = MODELS_TRAINED_DIR / "gesture_model_2_skip.pth"
 MEDIAPIPE_HAND_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR / "hand_landmarker.task"
 MEDIAPIPE_POSE_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR / "pose_landmarker_lite.task"
 
 # Metadata Paths
 LANDMARKS_DIR_METADATA_PKL = LANDMARKS_DIR / "landmarks_metadata.pkl"
-GESTURE_MODEL_METADATA_PATH = MODELS_TRAINED_DIR / "gesture_model_metadata.pkl"
+GESTURE_MODEL_METADATA_PATH = MODELS_TRAINED_DIR / "gesture_model_metadata_2_skip.pkl"
 REPRESENTATIVES_LEFT = OUTPUT_DIR / "gesture_metadata" / "representatives_left.json"
 
 # Gesture recognizer model hyperparameters

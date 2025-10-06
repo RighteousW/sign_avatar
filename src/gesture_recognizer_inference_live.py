@@ -11,15 +11,12 @@ import time
 from collections import deque
 import argparse
 from typing import Dict, Tuple, List, Optional
-from scipy import interpolate
 
 from constants import (
     GESTURE_MODEL_METADATA_PATH,
     GESTURE_MODEL_PATH,
-    MODELS_TRAINED_DIR,
     MEDIAPIPE_HAND_LANDMARKER_PATH,
     MEDIAPIPE_POSE_LANDMARKER_PATH,
-    DEFAULT_SEQUENCE_LENGTH,
 )
 
 
