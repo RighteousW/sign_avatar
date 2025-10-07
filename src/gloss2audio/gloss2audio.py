@@ -1,16 +1,16 @@
-from gloss2text_model_training import load_full_model, translate_sentence
+from model_training import load_gloss2text_full_model, gloss2text_translate_sentence
 from gtts import gTTS
 
 class Gloss2Text:
     def __init__(self, device, gloss_vocab=None, text_vocab=None):
-        model, _gloss_vocab, _text_vocab, _ = load_full_model('gloss2text_best_bleu', device)
+        model, _gloss_vocab, _text_vocab, _ = load_gloss2text_full_model('gloss2text_best_bleu', device)
         self.model = model
         self.gloss_vocab = gloss_vocab if gloss_vocab else _gloss_vocab
         self.text_vocab = text_vocab if text_vocab else _text_vocab
         self.device = device
 
     def infer(self, gloss_sequence: list[str]) -> list[str]:
-        translation = translate_sentence(
+        translation = gloss2text_translate_sentence(
             self.model, gloss_sequence, self.gloss_vocab, self.text_vocab, self.device
         )
         return translation
