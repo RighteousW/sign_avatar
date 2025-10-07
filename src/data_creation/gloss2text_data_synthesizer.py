@@ -1,7 +1,7 @@
 import itertools  # Necessary for efficient slicing
 import csv
 
-from audio2gloss import AudioToGlossConverter  # Import the csv module for proper CSV writing
+from ..audio2gloss import AudioToGlossConverter  # Import the csv module for proper CSV writing
 
 
 def load_first_n_sentences(filepath, n_lines=100000):

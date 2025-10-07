@@ -14,7 +14,7 @@ import argparse
 from typing import List, Dict, Tuple
 from scipy import interpolate
 
-from constants import (
+from ..constants import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_DROPOUT,
     DEFAULT_EPOCHS,
@@ -281,7 +281,7 @@ class LandmarkDataLoader:
         )
 
 
-class SignLanguageModel(nn.Module):
+class GestureRecognizerModel(nn.Module):
     def __init__(
         self,
         input_size: int,
@@ -560,7 +560,7 @@ def train_single_model(args, skip_pattern: int):
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    model = SignLanguageModel(
+    model = GestureRecognizerModel(
         input_size=feature_info["total_features"],
         num_classes=len(class_names),
         hidden_size=args.hidden_size,

@@ -2,17 +2,68 @@ import cv2
 import torch
 import pickle
 import numpy as np
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 from collections import deque
 from typing import List, Optional, Tuple
 
-from constants import (
+from ..model_training import GestureRecognizerModel
+
+from ..constants import (
     GESTURE_MODEL_PATH,
     GESTURE_MODEL_METADATA_PATH,
 )
-from src.landmark_extraction.landmark_extraction import LandmarkExtractor
+from ..landmark_extraction import LandmarkExtractor
+
+
+def extract_landmarks_from_frame_data(
+    frame_data: dict, feature_info: dict
+) -> Optional[np.ndarray]:
+    """
+    Extract landmarks from LandmarkExtractor frame_data and format them for the model.
+
+    Args:
+        frame_data: Dictionary containing 'hands' and/or 'pose' data from LandmarkExtractor
+        feature_info: Feature dimension information from the model
+
+    Returns:
+        Numpy array of flattened landmarks or None if extraction fails
+    """
+    features = []
+
+    # Extract hand landmarks
+    if feature_info["hand_landmarks"] > 0:
+        max_hands = feature_info["max_hands"]
+        hand_dim_per_hand = feature_info["hand_landmarks_per_hand"]
+        hand_features = np.zeros(feature_info["hand_landmarks"])
+
+        hands = frame_data.get("hands", [])
+        if hands:
+            for i, hand_data in enumerate(hands[:max_hands]):
+                landmarks = hand_data.get("landmarks", [])
+                landmarks_flat = np.array(landmarks[:21]).flatten()
+                start_idx = i * hand_dim_per_hand
+                end_idx = start_idx + len(landmarks_flat)
+                hand_features[start_idx:end_idx] = landmarks_flat
+
+        features.extend(hand_features)
+
+    # Extract pose landmarks
+    if feature_info["pose_landmarks"] > 0:
+        pose_features = np.zeros(feature_info["pose_landmarks"])
+
+        pose = frame_data.get("pose")
+        if pose:
+            landmarks = pose.get("landmarks", [])
+            # Extract only x, y, z (skip visibility for consistency with model)
+            landmarks_xyz = [[lm[0], lm[1], lm[2]] for lm in landmarks]
+            landmarks_flat = np.array(landmarks_xyz).flatten()
+            pose_features[: min(len(landmarks_flat), len(pose_features))] = (
+                landmarks_flat[: len(pose_features)]
+            )
+
+        features.extend(pose_features)
+
+    return np.array(features, dtype=np.float32)
+
 
 class GestureRecognizer:
     """Wrapper for the trained sign language model"""
@@ -31,7 +82,7 @@ class GestureRecognizer:
             self.model_info = pickle.load(f)
 
         # Initialize model
-        self.model = SignLanguageModel(
+        self.model = GestureRecognizerModel(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],
@@ -146,9 +197,7 @@ class Video2Gloss:
                 break
 
             frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
-            hand_result = frame_data.get("hand_landmarks")
-            pose_result = frame_data.get("pose_landmarks")
-            landmarks = self.extract_landmarks(hand_result, pose_result)
+            landmarks = extract_landmarks_from_frame_data(frame_data, self.feature_info)
 
             if landmarks is not None:
                 all_landmarks.append(landmarks)
@@ -168,54 +217,6 @@ class Video2Gloss:
         gloss_sequence = self._sliding_window_inference(all_landmarks)
 
         return gloss_sequence
-
-    def extract_landmarks(self, hand_result, pose_result) -> Optional[np.ndarray]:
-        """
-        Extract landmarks from MediaPipe results and format them for the model.
-
-        Args:
-            hand_result: MediaPipe hand detection result
-            pose_result: MediaPipe pose detection result
-
-        Returns:
-            Numpy array of flattened landmarks or None if extraction fails
-        """
-        features = []
-
-        # Extract hand landmarks
-        if self.feature_info["hand_landmarks"] > 0:
-            max_hands = self.feature_info["max_hands"]
-            hand_dim_per_hand = self.feature_info["hand_landmarks_per_hand"]
-            hand_features = np.zeros(self.feature_info["hand_landmarks"])
-
-            if hand_result and hand_result.hand_landmarks:
-                for i, hand_landmarks in enumerate(
-                    hand_result.hand_landmarks[:max_hands]
-                ):
-                    landmarks = [[lm.x, lm.y, lm.z] for lm in hand_landmarks]
-                    landmarks_flat = np.array(landmarks[:21]).flatten()
-                    start_idx = i * hand_dim_per_hand
-                    end_idx = start_idx + len(landmarks_flat)
-                    hand_features[start_idx:end_idx] = landmarks_flat
-
-            features.extend(hand_features)
-
-        # Extract pose landmarks
-        if self.feature_info["pose_landmarks"] > 0:
-            pose_features = np.zeros(self.feature_info["pose_landmarks"])
-
-            if pose_result and pose_result.pose_landmarks:
-                pose_landmarks = pose_result.pose_landmarks[0]
-                # Only use x,y,z coordinates (skip visibility for consistency)
-                landmarks = [[lm.x, lm.y, lm.z] for lm in pose_landmarks]
-                landmarks_flat = np.array(landmarks).flatten()
-                pose_features[: min(len(landmarks_flat), len(pose_features))] = (
-                    landmarks_flat[: len(pose_features)]
-                )
-
-            features.extend(pose_features)
-
-        return np.array(features, dtype=np.float32)
 
     def _sliding_window_inference(
         self, landmarks: List[np.ndarray]
@@ -279,12 +280,11 @@ class LiveStream2Gloss:
 
     def __init__(
         self,
-        mediapipe_processor: MediapipeProcessor,
         gesture_recognizer: GestureRecognizer,
         confidence_threshold: float = 0.6,
         display: bool = True,
     ):
-        self.mediapipe_processor = mediapipe_processor
+        self.landmark_extractor = LandmarkExtractor(use_pose=True)
         self.gesture_recognizer = gesture_recognizer
         self.confidence_threshold = confidence_threshold
         self.display = display
@@ -334,9 +334,11 @@ class LiveStream2Gloss:
                     self.fps_history.append(fps)
                 self.last_frame_time = current_time
 
-                # Process frame
-                hand_result, pose_result = self.mediapipe_processor.process(frame)
-                landmarks = self._extract_landmarks(hand_result, pose_result)
+                # Process frame using LandmarkExtractor
+                frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
+                landmarks = extract_landmarks_from_frame_data(
+                    frame_data, self.feature_info
+                )
 
                 # Add to buffer
                 if landmarks is not None:
@@ -411,44 +413,6 @@ class LiveStream2Gloss:
                 print("\nPrediction history:")
                 for gloss, conf, frame in list(self.prediction_history)[-10:]:
                     print(f"  Frame {frame:5d}: {gloss:20s} (conf: {conf:.3f})")
-
-    def _extract_landmarks(self, hand_result, pose_result) -> Optional[np.ndarray]:
-        """Extract landmarks from MediaPipe results"""
-        features = []
-
-        # Extract hand landmarks
-        if self.feature_info["hand_landmarks"] > 0:
-            max_hands = self.feature_info["max_hands"]
-            hand_dim_per_hand = self.feature_info["hand_landmarks_per_hand"]
-            hand_features = np.zeros(self.feature_info["hand_landmarks"])
-
-            if hand_result and hand_result.hand_landmarks:
-                for i, hand_landmarks in enumerate(
-                    hand_result.hand_landmarks[:max_hands]
-                ):
-                    landmarks = [[lm.x, lm.y, lm.z] for lm in hand_landmarks]
-                    landmarks_flat = np.array(landmarks[:21]).flatten()
-                    start_idx = i * hand_dim_per_hand
-                    end_idx = start_idx + len(landmarks_flat)
-                    hand_features[start_idx:end_idx] = landmarks_flat
-
-            features.extend(hand_features)
-
-        # Extract pose landmarks
-        if self.feature_info["pose_landmarks"] > 0:
-            pose_features = np.zeros(self.feature_info["pose_landmarks"])
-
-            if pose_result and pose_result.pose_landmarks:
-                pose_landmarks = pose_result.pose_landmarks[0]
-                landmarks = [[lm.x, lm.y, lm.z] for lm in pose_landmarks]
-                landmarks_flat = np.array(landmarks).flatten()
-                pose_features[: min(len(landmarks_flat), len(pose_features))] = (
-                    landmarks_flat[: len(pose_features)]
-                )
-
-            features.extend(pose_features)
-
-        return np.array(features, dtype=np.float32)
 
     def _draw_display(self, frame, prediction):
         """Draw information overlay on frame"""
@@ -587,7 +551,6 @@ def main():
             pass  # Add custom handling here if needed
 
         livestream2gloss = LiveStream2Gloss(
-            mediapipe_processor=mediapipe_processor,
             gesture_recognizer=gesture_recognizer,
             confidence_threshold=args.confidence,
             display=not args.no_display,

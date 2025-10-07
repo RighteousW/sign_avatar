@@ -4,7 +4,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 
-from constants import FRAME_RATE, FRAME_WIDTH, FRAME_HEIGHT, VIDEOS_DIR
+from ..constants import FRAME_RATE, FRAME_WIDTH, FRAME_HEIGHT, VIDEOS_DIR
 
 
 @contextmanager

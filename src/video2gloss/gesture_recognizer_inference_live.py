@@ -12,7 +12,7 @@ from collections import deque
 import argparse
 from typing import Dict, Tuple, List, Optional
 
-from constants import (
+from ..constants import (
     GESTURE_MODEL_METADATA_PATH,
     GESTURE_MODEL_PATH,
     MEDIAPIPE_HAND_LANDMARKER_PATH,

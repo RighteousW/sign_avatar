@@ -682,7 +682,8 @@ if __name__ == "__main__":
 
         print("=== Namibian Sign Language (NSL) Gloss Converter ===\n")
         import torch
-        from gloss2audio import Gloss2Text
+        from ..gloss2audio import Gloss2Text
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         gloss2text = Gloss2Text(device)
         for sentence in test_sentences:

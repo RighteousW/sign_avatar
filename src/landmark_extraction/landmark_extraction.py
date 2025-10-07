@@ -7,7 +7,7 @@ import pickle
 import argparse
 from datetime import datetime
 
-from constants import (
+from ..constants import (
     LANDMARKS_DIR,
     LANDMARKS_DIR_METADATA_PKL,
     MEDIAPIPE_HAND_LANDMARKER_PATH,

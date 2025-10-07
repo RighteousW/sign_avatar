@@ -9,7 +9,7 @@ from collections import defaultdict
 import re
 from datetime import datetime
 
-from constants import LANDMARKS_DIR, OUTPUT_DIR
+from ..constants import LANDMARKS_DIR, OUTPUT_DIR
 
 
 class GestureRepresentativeSelector:
@@ -36,6 +36,7 @@ class GestureRepresentativeSelector:
 
         return gloss
 
+
     def determine_handedness(self, frames: List[Dict]) -> str:
         """Determine handedness based on first and last 25% of frames"""
         if not frames:
@@ -55,9 +56,10 @@ class GestureRepresentativeSelector:
                 for hand in frame["hands"]:
                     hands_present.add(hand["handedness"])
 
-            elif "Left" in hands_present:
+            # Fixed: Move these checks outside the if/elif chain
+            if "Left" in hands_present:
                 left_count += 1
-            elif "Right" in hands_present:
+            if "Right" in hands_present:
                 right_count += 1
 
         total_frames = len(important_frames)
@@ -70,7 +72,7 @@ class GestureRepresentativeSelector:
             return "right"
         else:
             return "unknown"
-
+    
     def calculate_hand_consistency(self, frames: List[Dict]) -> Dict[str, float]:
         """Calculate hand consistency metrics to detect flickering"""
         if not frames:
@@ -604,7 +606,7 @@ def main():
         "--glosses", nargs="+", required=True, help="List of glosses to chain"
     )
     generate_parser.add_argument(
-        "--transition-length", type=int, default=6, help="Transition length in frames"
+        "--transition-length", type=int, default=4, help="Transition length in frames"
     )
     generate_parser.add_argument("--output", required=True, help="Output file path")
 
@@ -626,7 +628,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-# example usage:
-# python3 src/interpolation_transition.py create-metadata --handedness left
-# python3 src/interpolation_transition.py generate --metadata output/gesture_metadata/representatives_left.json --glosses 0 1 2 3 4 5 6 7 8 9 --transition-length 6 --output output/generated_sequence.pkl

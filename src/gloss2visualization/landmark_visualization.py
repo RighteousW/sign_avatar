@@ -6,7 +6,7 @@ from tkinter import filedialog
 import tkinter as tk
 import mediapipe as mp
 
-from constants import ROOT_DIR
+from ..constants import ROOT_DIR
 
 
 class LandmarkVisualizer:

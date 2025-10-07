@@ -1,4 +1,4 @@
-from model_training import load_gloss2text_full_model, gloss2text_translate_sentence
+from ..model_training import load_gloss2text_full_model, gloss2text_translate_sentence
 from gtts import gTTS
 
 class Gloss2Text:
