@@ -24,9 +24,9 @@ import numpy as np
 import cv2
 import mediapipe as mp
 
-from audio_to_gloss import AudioToGlossConverter
-from interpolation_transition import GestureTransitionGenerator
 from constants import REPRESENTATIVES_LEFT
+from src.audio2gloss.audio2gloss_nsl import AudioToGlossConverter
+from src.gloss2visualization.interpolation_transition import GestureTransitionGenerator
 
 
 class LandmarkCanvas(QWidget):
