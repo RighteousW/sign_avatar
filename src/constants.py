@@ -8,14 +8,23 @@ OUTPUT_DIR = DATA_DIR / "output"
 DATASET_DIR = DATA_DIR / "dataset"
 LANDMARKS_DIR = DATASET_DIR / "landmarks"
 MODELS_DIR = ROOT_DIR / "models"
-MODELS_DEPENDENCY_DIR = MODELS_DIR / "dependencies"
-MODELS_TRAINED_DIR = MODELS_DIR / "trained_models"
-GESTURE_MODEL_DIR = MODELS_TRAINED_DIR / "gesture_recognizer"
+DEPENDENCY_MODELS_DIR = MODELS_DIR / "dependencies"
+TRAINED_MODELS_DIR = MODELS_DIR / "trained_models"
+GESTURE_MODEL_DIR = TRAINED_MODELS_DIR / "gesture_recognizer"
 
 # Model Paths
+GESTURE_MODEL_0_SKIP = GESTURE_MODEL_DIR / "gesture_model_0_skip.pth"
+GESTURE_MODEL_1_SKIP = GESTURE_MODEL_DIR / "gesture_model_1_skip.pth"
+GESTURE_MODEL_2_SKIP = GESTURE_MODEL_DIR / "gesture_model_2_skip.pth"
+
+GESTURE_MODEL_2_SKIP_METADATA_PATH = (
+    GESTURE_MODEL_DIR / "gesture_model_metadata_2_skip.pkl"
+)
+
+
 GESTURE_MODEL_PATH = GESTURE_MODEL_DIR / "gesture_model_2_skip.pth"
-MEDIAPIPE_HAND_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR / "hand_landmarker.task"
-MEDIAPIPE_POSE_LANDMARKER_PATH = MODELS_DEPENDENCY_DIR / "pose_landmarker_lite.task"
+MEDIAPIPE_HAND_LANDMARKER_PATH = DEPENDENCY_MODELS_DIR / "hand_landmarker.task"
+MEDIAPIPE_POSE_LANDMARKER_PATH = DEPENDENCY_MODELS_DIR / "pose_landmarker_lite.task"
 
 # Metadata Paths
 LANDMARKS_DIR_METADATA_PKL = LANDMARKS_DIR / "landmarks_metadata.pkl"
@@ -34,3 +43,10 @@ DEFAULT_EPOCHS = 30
 FRAME_RATE = 30
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
+
+WEB_APP_CONFIG = {
+    "frames_to_skip": 2,
+    "use_pose": False,
+    "hand_model_path": MEDIAPIPE_HAND_LANDMARKER_PATH,
+    "pose_model_path": MEDIAPIPE_POSE_LANDMARKER_PATH,
+}

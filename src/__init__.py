@@ -1,4 +1,4 @@
-from .app import *
+from .gui_app import *
 from .audio2gloss import *
 from .data_creation import *
 from .gloss2audio import *
@@ -9,7 +9,7 @@ from .video2gloss import *
 from .constants import *
 
 __all__ = [
-    "app",
+    "gui_app",
     "audio2gloss",
     "data_creation",
     "gloss2audio",
