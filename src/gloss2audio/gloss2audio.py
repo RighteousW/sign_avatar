@@ -1,9 +1,12 @@
 from ..model_training import load_gloss2text_full_model, gloss2text_translate_sentence
+from ..constants import TRAINED_MODELS_DIR
 from gtts import gTTS
 
 class Gloss2Text:
     def __init__(self, device, gloss_vocab=None, text_vocab=None):
-        model, _gloss_vocab, _text_vocab, _ = load_gloss2text_full_model('gloss2text_best_bleu', device)
+        model, _gloss_vocab, _text_vocab, _ = load_gloss2text_full_model(
+            TRAINED_MODELS_DIR / "gloss2text_best_bleu_synthetic", device
+        )
         self.model = model
         self.gloss_vocab = gloss_vocab if gloss_vocab else _gloss_vocab
         self.text_vocab = text_vocab if text_vocab else _text_vocab
@@ -37,7 +40,7 @@ class Gloss2Audio:
         tts.synthesize()
         
         return tts.audio_path
-    
+
 if __name__ == "__main__":
     import torch
 

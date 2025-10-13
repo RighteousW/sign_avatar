@@ -99,63 +99,60 @@ class AudioToGlossConverter:
         audio_data = sr.AudioData(wav_data, sample_rate, 2)
         return audio_data
 
-    def text_to_glosses(self, text: str) -> Tuple[str, List[str]]:
+    def text_to_glosses(self, text: str) -> List[List[str]]:
         """
         Convert text to Namibian Sign Language glosses.
-        Returns: (glosses_string, glosses_list)
+
+        Returns: List of clause glosses, where each clause is a list of gloss strings.
+                 Example: [['TOMORROW', 'I', 'STORE', 'GO'], ['MILK', 'BUY']]
         """
         if not self.nlp:
             raise RuntimeError("spaCy model not loaded. Call load_model() first.")
 
         doc = self.nlp(text)
-        all_glosses = []
+        all_clause_glosses = []
 
         # Process each sentence
         for sent in doc.sents:
+            # Split sentence into clauses
             clauses = self._split_into_clauses(sent)
 
-            if len(clauses) > 1:
-                # Multiple clauses - process each separately
-                for i, clause in enumerate(clauses):
-                    clause_glosses = self._process_clause(clause)
-                    all_glosses.extend(clause_glosses)
-                    # Add separator in debug mode only
-                    if self.debug and i < len(clauses) - 1 and clause_glosses:
-                        all_glosses.append("|")
-            else:
-                # Single clause
-                for clause in clauses:
-                    clause_glosses = self._process_clause(clause)
-                    all_glosses.extend(clause_glosses)
+            # Convert each clause to glosses independently
+            for clause in clauses:
+                clause_glosses = self._clause_to_glosses(clause)
+                if clause_glosses:  # Only add non-empty clauses
+                    all_clause_glosses.append(clause_glosses)
 
-        # Clean up any trailing separators (debug mode)
-        while all_glosses and all_glosses[-1] == "|":
-            all_glosses.pop()
+        return all_clause_glosses
 
-        return " ".join(all_glosses), all_glosses
-
-    def audio_file_to_glosses(self, audio_file_path: str) -> Tuple[str, List[str]]:
+    def audio_file_to_glosses(
+        self, audio_file_path: str
+    ) -> Tuple[str, List[List[str]]]:
         """
         Convenience method: convert audio file directly to NSL glosses.
-        Returns the recognized text and the list of glosses.
+        Returns the recognized text and the list of clause glosses.
         """
         text = self.audio_file_to_text(audio_file_path)
-        glosses_string, glosses_list = self.text_to_glosses(text)
-        return text, glosses_list
+        clause_glosses = self.text_to_glosses(text)
+        return text, clause_glosses
 
-    def audio_data_to_glosses(self, audio_data: sr.AudioData) -> Tuple[str, List[str]]:
+    def audio_data_to_glosses(
+        self, audio_data: sr.AudioData
+    ) -> Tuple[str, List[List[str]]]:
         """
         Convenience method: convert AudioData directly to NSL glosses.
-        Returns the recognized text and the list of glosses.
+        Returns the recognized text and the list of clause glosses.
         """
         text = self.audio_data_to_text(audio_data)
-        glosses_string, glosses_list = self.text_to_glosses(text)
-        return text, glosses_list
+        clause_glosses = self.text_to_glosses(text)
+        return text, clause_glosses
 
-    def numpy_to_glosses(self, audio_array, sample_rate: int) -> Tuple[str, List[str]]:
+    def numpy_to_glosses(
+        self, audio_array, sample_rate: int
+    ) -> Tuple[str, List[List[str]]]:
         """
         Convenience method: convert numpy array directly to NSL glosses.
-        Returns the recognized text and the list of glosses.
+        Returns the recognized text and the list of clause glosses.
         """
         audio_data = self.numpy_to_audio_data(audio_array, sample_rate)
         return self.audio_data_to_glosses(audio_data)
@@ -298,12 +295,18 @@ class AudioToGlossConverter:
             current = current.head
         return False
 
-    def _process_clause(self, clause) -> List[str]:
+    def _clause_to_glosses(self, clause) -> List[str]:
         """
-        Process a clause and convert it to NSL glosses.
+        Convert a single clause to NSL glosses.
 
         NSL follows SOV (Subject-Object-Verb) word order with the general structure:
         TIME - LOCATION - SUBJECT - OBJECT - ADJECTIVE - VERB - NEGATION - QUESTION
+
+        Args:
+            clause: List of spaCy tokens representing a clause
+
+        Returns:
+            List of gloss strings for this clause
         """
         glosses = []
         added_tokens = set()
@@ -681,14 +684,14 @@ if __name__ == "__main__":
         ]
 
         print("=== Namibian Sign Language (NSL) Gloss Converter ===\n")
-        import torch
-        from ..gloss2audio import Gloss2Text
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        gloss2text = Gloss2Text(device)
         for sentence in test_sentences:
-            glosses_str, glosses_list = converter.text_to_glosses(sentence)
-            infered_text = " ".join(gloss2text.infer(glosses_list))
+            clause_glosses = converter.text_to_glosses(sentence)
+
             print(f"Input: {sentence}")
-            print(f"NSL Glosses: {glosses_str}\n")
-            print(f"Inferred Text: {infered_text}\n")
+            print(f"Output: {len(clause_glosses)} clause(s)")
+
+            for i, glosses in enumerate(clause_glosses, 1):
+                print(f"  Clause {i}: {' '.join(glosses)}")
+
+            print()

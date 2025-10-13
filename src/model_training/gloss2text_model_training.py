@@ -576,7 +576,8 @@ def optimize_for_hardware(device):
     else:
         # CPU optimizations
         torch.set_num_threads(min(4, os.cpu_count()))
-        print(f"Using CPU with {os.cpu_count()} threads")
+        cpu_count = torch.get_num_threads()
+        print(f"Using CPU with {cpu_count} threads")
 
     return settings
 
@@ -772,10 +773,13 @@ if __name__ == "__main__":
     print("GLOSS-TO-TEXT TRANSLATOR WITH ATTENTION")
     print("=" * 60)
 
-    # print("\n[1/8] Loading ASLG-PC12 dataset...")
+    # print("\n[1/8] Loading dataset...")
+    MAX_SAMPLES = 100_000
     gloss_sequences, text_sequences = load_data_from_file(
-        "data/ASLG-PC12 dataset/synthetic.csv", "csv"
+        "data/dataset/ASLG-PC12 dataset/synthetic.csv", "csv"
     )
+    gloss_sequences = gloss_sequences[:MAX_SAMPLES]
+    text_sequences = text_sequences[:MAX_SAMPLES]
     print(f"   Loaded {len(gloss_sequences)} total samples")
 
     # # Split into train/validation (90/10)
@@ -790,8 +794,8 @@ if __name__ == "__main__":
 
     # ===== STEP 2: BUILD VOCABULARIES =====
     print("\n[2/8] Building vocabularies...")
-    gloss_vocab = build_vocab(train_gloss, min_freq=5)
-    text_vocab = build_vocab(train_text, min_freq=5)
+    gloss_vocab = build_vocab(train_gloss, min_freq=10)
+    text_vocab = build_vocab(train_text, min_freq=10)
 
     print(f"   Gloss vocabulary size: {len(gloss_vocab)}")
     print(f"   Text vocabulary size: {len(text_vocab)}")
@@ -805,13 +809,13 @@ if __name__ == "__main__":
     print("\n[4/8] Configuring model...")
 
     # Optimized config for full dataset on CPU
-    HIDDEN_SIZE = 128
+    HIDDEN_SIZE = 256
     NUM_LAYERS = 2
     NUM_EPOCHS = 10
     BATCH_SIZE = 16
     EMBEDDING_SIZE = 256
-    DROPOUT = 0.3
-    ATTENTION_TYPE = "general"
+    DROPOUT = 0.25
+    ATTENTION_TYPE = "dot"
     LEARNING_RATE = 0.001
 
     INPUT_DIM = len(gloss_vocab)
@@ -955,7 +959,14 @@ if __name__ == "__main__":
         # Save best model based on validation loss
         if val_loss < best_loss:
             best_loss = val_loss
-            save_checkpoint(model, optimizer, epoch, val_loss, config, "gloss2text_synthetic.pth")
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                val_loss,
+                config,
+                "models/checkpoints/gloss2text_synthetic.pth",
+            )
             print(f"   ✓ New best model saved (val_loss: {val_loss:.4f})")
 
         # Evaluate BLEU every 2 epochs
@@ -974,7 +985,7 @@ if __name__ == "__main__":
                     gloss_vocab,
                     text_vocab,
                     config,
-                    save_dir="gloss2text_best_bleu_synthetic",
+                    save_dir="models/trained_models/gloss2text_best_bleu_synthetic",
                 )
                 print(f"   ✓ Best BLEU model saved")
 
@@ -991,7 +1002,9 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # Load best model
-    checkpoint = load_checkpoint("gloss2text_synthetic.pth", device)
+    checkpoint = load_checkpoint(
+        "models/checkpoints/gloss2text_synthetic.pth", device
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
 
     eval_results = evaluate_model(
@@ -1025,7 +1038,11 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Saving final model package...")
     save_full_model(
-        model, gloss_vocab, text_vocab, config, save_dir="gloss2text_final_synthetic"
+        model,
+        gloss_vocab,
+        text_vocab,
+        config,
+        save_dir="models/trained_models/gloss2text_final_synthetic",
     )
 
     print("\n" + "=" * 60)

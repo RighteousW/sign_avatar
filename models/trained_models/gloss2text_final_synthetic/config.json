@@ -1,11 +1,11 @@
 {
-  "input_dim": 8066,
-  "output_dim": 8177,
+  "input_dim": 3992,
+  "output_dim": 5444,
   "embedding_size": 256,
-  "hidden_size": 128,
+  "hidden_size": 256,
   "num_layers": 2,
-  "dropout": 0.3,
-  "attention_type": "general",
+  "dropout": 0.25,
+  "attention_type": "dot",
   "batch_size": 16,
   "learning_rate": 0.001,
   "num_epochs": 10
