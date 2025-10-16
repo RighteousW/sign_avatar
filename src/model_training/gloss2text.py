@@ -574,8 +574,8 @@ def optimize_for_hardware(device):
         print(f"GPU Memory: {gpu_memory:.2f} GB")
 
     else:
-        # CPU optimizations
-        torch.set_num_threads(min(4, os.cpu_count()))
+        # CPU optimizations, default to 4 threads or half of available cores
+        torch.set_num_threads(min(4, int(os.cpu_count()) *.5))
         cpu_count = torch.get_num_threads()
         print(f"Using CPU with {cpu_count} threads")
 
@@ -782,8 +782,8 @@ if __name__ == "__main__":
     text_sequences = text_sequences[:MAX_SAMPLES]
     print(f"   Loaded {len(gloss_sequences)} total samples")
 
-    # # Split into train/validation (90/10)
-    split_idx = int(0.9 * len(gloss_sequences))
+    # # Split into train/validation
+    split_idx = int(0.8 * len(gloss_sequences))
     train_gloss = gloss_sequences[:split_idx]
     train_text = text_sequences[:split_idx]
     val_gloss = gloss_sequences[split_idx:]
@@ -794,8 +794,8 @@ if __name__ == "__main__":
 
     # ===== STEP 2: BUILD VOCABULARIES =====
     print("\n[2/8] Building vocabularies...")
-    gloss_vocab = build_vocab(train_gloss, min_freq=10)
-    text_vocab = build_vocab(train_text, min_freq=10)
+    gloss_vocab = build_vocab(train_gloss, min_freq=5)
+    text_vocab = build_vocab(train_text, min_freq=5)
 
     print(f"   Gloss vocabulary size: {len(gloss_vocab)}")
     print(f"   Text vocabulary size: {len(text_vocab)}")

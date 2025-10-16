@@ -26,7 +26,7 @@ def main():
 
     # --- Configuration ---
     INPUT_FILE = "data/dataset/ASLG-PC12 dataset/train.csv"
-    # OUTPUT_FILE = "data/dataset/ASLG-PC12 dataset/synthetic.csv"
+    OUTPUT_FILE = "data/dataset/ASLG-PC12 dataset/synthetic.csv"
 
     _, text_sequences = load_data_from_file(INPUT_FILE, "csv")
 
