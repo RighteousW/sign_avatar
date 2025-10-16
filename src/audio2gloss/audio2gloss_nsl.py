@@ -295,6 +295,100 @@ class AudioToGlossConverter:
             current = current.head
         return False
 
+
+    def _keep_token(self, token) -> bool:
+        """
+        Determine if a token should be kept in the gloss output.
+        We keep content words AND important prepositions that convey meaning.
+        """
+        keep_pos = {"NOUN", "VERB", "ADJ", "ADV", "NUM", "PRON", "PROPN"}
+
+        if token.pos_ not in keep_pos and token.pos_ != "ADP":
+            return False
+
+        # Keep important prepositions that convey temporal, causal, or spatial meaning
+        if token.pos_ == "ADP":
+            important_preps = {
+                "after",
+                "before",
+                "during",
+                "until",
+                "since",
+                "from",
+                "to",
+                "with",
+                "without",
+                "for",
+                "about",
+                "against",
+                "between",
+                "through",
+                "across",
+                "over",
+                "under",
+                "above",
+                "below",
+                "in",
+                "on",
+                "at",
+                "near",
+                "by",
+            }
+            return token.text.lower() in important_preps
+
+        # Filter out function words
+        if token.pos_ in {"DET", "CCONJ", "SCONJ", "AUX", "PART"}:
+            return False
+
+        # Exception: keep modal auxiliaries
+        if token.pos_ == "AUX" and token.tag_ == "MD":
+            return True
+
+        # Filter out punctuation and whitespace
+        if token.is_punct or token.is_space:
+            return False
+
+        # Filter out auxiliary verbs
+        if token.lemma_ in ["be", "have", "do"] and token.pos_ in ["AUX", "VERB"]:
+            return False
+
+        # Filter out expletive "it"
+        if token.text.lower() == "it" and token.pos_ == "PRON":
+            if token.dep_ in ["expl", "nsubj"]:
+                if token.head.pos_ in ["VERB", "AUX"]:
+                    if token.head.lemma_ in ["be", "rain", "snow", "seem", "appear"]:
+                        return False
+                    for child in token.head.children:
+                        if child.pos_ == "ADJ":
+                            return False
+
+        return True
+
+
+    def _get_prepositional_phrases(self, clause) -> List[Tuple]:
+        """
+        Extract prepositional phrases with their prepositions.
+        Returns list of (preposition_token, object_phrase) tuples.
+        """
+        prep_phrases = []
+
+        for token in clause:
+            if token.pos_ == "ADP" and self._keep_token(token):
+                # Find the object of the preposition
+                pobj = None
+                for child in token.children:
+                    if child.dep_ == "pobj":
+                        pobj = child
+                        break
+
+                if pobj:
+                    # Get the full noun phrase for the object
+                    obj_phrase = self._get_noun_phrase(pobj)
+                    prep_phrases.append((token, obj_phrase))
+
+        return prep_phrases
+
+
     def _clause_to_glosses(self, clause) -> List[str]:
         """
         Convert a single clause to NSL glosses.
@@ -353,7 +447,7 @@ class AudioToGlossConverter:
         # Extract location words
         location_words = [t for t in clause if t.ent_type_ in ["GPE", "LOC", "FAC"]]
 
-        # Extract question words (but not when they're subjects/objects in relative clauses)
+        # Extract question words
         question_words = [
             t
             for t in clause
@@ -361,34 +455,30 @@ class AudioToGlossConverter:
             and t.dep_ not in ["nsubj", "dobj"]
         ]
 
-        # Extract negations - need to catch all forms
+        # Extract negations
         negations = []
         for token in clause:
             if token.dep_ == "neg":
                 negations.append(token)
-            elif token.text.lower() in [
-                "not",
-                "no",
-                "never",
-                "n't",
-            ] and token.pos_ not in ["PRON", "DET"]:
+            elif token.text.lower() in ["not", "no", "never", "n't"] and token.pos_ not in [
+                "PRON",
+                "DET",
+            ]:
                 negations.append(token)
             elif "n't" in token.text.lower() and token.pos_ != "PRON":
                 negations.append(token)
 
-        # Also check verb children for negations
         for token in clause:
             if token.pos_ == "VERB":
                 for child in token.children:
-                    if child.dep_ == "neg" or child.text.lower() in [
-                        "not",
-                        "n't",
-                        "never",
-                    ]:
+                    if child.dep_ == "neg" or child.text.lower() in ["not", "n't", "never"]:
                         if child not in negations:
                             negations.append(child)
 
-        # Extract subjects and objects, keeping complete noun phrases together
+        # Extract prepositional phrases
+        prep_phrases = self._get_prepositional_phrases(clause)
+
+        # Extract subjects and objects
         subjects = []
         objects = []
         subject_phrases = []
@@ -403,14 +493,8 @@ class AudioToGlossConverter:
                 phrase = self._get_noun_phrase(token)
                 object_phrases.append(phrase)
                 objects.extend(phrase)
-            elif token.dep_ == "pobj" and token.head.dep_ not in ["prep"]:
-                # Only include prepositional objects for important prepositions
-                if token.head.text.lower() in ["to", "at", "in", "on"]:
-                    phrase = self._get_noun_phrase(token)
-                    object_phrases.append(phrase)
-                    objects.extend(phrase)
 
-        # Extract main verbs (not auxiliaries)
+        # Extract main verbs
         verbs = [
             t
             for t in clause
@@ -419,7 +503,7 @@ class AudioToGlossConverter:
             and t.lemma_ not in ["be", "have", "do"]
         ]
 
-        # Extract modals and modal auxiliaries
+        # Extract modals
         modals = [
             t
             for t in clause
@@ -434,14 +518,11 @@ class AudioToGlossConverter:
         adjectives = [t for t in clause if t.pos_ == "ADJ"]
         verb_adverbs = [t for t in clause if t.pos_ == "ADV" and t.head.pos_ == "VERB"]
 
-        # Now build the glosses in NSL word order
+        # Build glosses in NSL word order
 
         # 1. TIME comes first
         for time_phrase in time_phrases:
-            if (
-                time_phrase[0] not in added_tokens
-                and time_phrase[1] not in added_tokens
-            ):
+            if time_phrase[0] not in added_tokens and time_phrase[1] not in added_tokens:
                 glosses.append(time_phrase[0].text.upper())
                 glosses.append(time_phrase[1].lemma_.upper())
                 added_tokens.add(time_phrase[0])
@@ -458,7 +539,7 @@ class AudioToGlossConverter:
                 glosses.append(loc.lemma_.upper())
                 added_tokens.add(loc)
 
-        # 3. SUBJECT (keep phrases together to preserve possessives etc.)
+        # 3. SUBJECT
         for phrase in subject_phrases:
             for subj in phrase:
                 if self._keep_token(subj) and subj not in added_tokens:
@@ -467,7 +548,21 @@ class AudioToGlossConverter:
                         glosses.append(gloss)
                     added_tokens.add(subj)
 
-        # 4. OBJECT (before verb in SOV)
+        # 4. PREPOSITIONAL PHRASES with temporal/causal meaning (before objects)
+        temporal_causal_preps = {"after", "before", "during", "until", "since", "for"}
+        for prep, obj_phrase in prep_phrases:
+            if prep.text.lower() in temporal_causal_preps:
+                if prep not in added_tokens:
+                    glosses.append(prep.lemma_.upper())
+                    added_tokens.add(prep)
+                for obj_token in obj_phrase:
+                    if self._keep_token(obj_token) and obj_token not in added_tokens:
+                        gloss = self._get_lemma_with_possessive(obj_token)
+                        if gloss not in glosses:
+                            glosses.append(gloss)
+                        added_tokens.add(obj_token)
+
+        # 5. OBJECT
         for phrase in object_phrases:
             for obj in phrase:
                 if self._keep_token(obj) and obj not in added_tokens:
@@ -476,31 +571,44 @@ class AudioToGlossConverter:
                         glosses.append(gloss)
                     added_tokens.add(obj)
 
-        # 5. ADJECTIVES
+        # 6. REMAINING PREPOSITIONAL PHRASES (spatial, instrumental, etc.)
+        for prep, obj_phrase in prep_phrases:
+            if prep.text.lower() not in temporal_causal_preps:
+                if prep not in added_tokens:
+                    glosses.append(prep.lemma_.upper())
+                    added_tokens.add(prep)
+                for obj_token in obj_phrase:
+                    if self._keep_token(obj_token) and obj_token not in added_tokens:
+                        gloss = self._get_lemma_with_possessive(obj_token)
+                        if gloss not in glosses:
+                            glosses.append(gloss)
+                        added_tokens.add(obj_token)
+
+        # 7. ADJECTIVES
         for adj in adjectives:
             if self._keep_token(adj) and adj not in added_tokens:
                 glosses.append(adj.lemma_.upper())
                 added_tokens.add(adj)
 
-        # 6. ADVERBS (before verb)
+        # 8. ADVERBS
         for adv in verb_adverbs:
             if self._keep_token(adv) and adv not in added_tokens:
                 glosses.append(adv.lemma_.upper())
                 added_tokens.add(adv)
 
-        # 7. MODALS
+        # 9. MODALS
         for modal in modals:
             if modal not in added_tokens:
                 glosses.append(modal.lemma_.upper())
                 added_tokens.add(modal)
 
-        # 8. VERB
+        # 10. VERB
         for verb in verbs:
             if self._keep_token(verb) and verb not in added_tokens:
                 glosses.append(verb.lemma_.upper())
                 added_tokens.add(verb)
 
-        # Catch any remaining content words we might have missed
+        # Catch any remaining content words
         processed_tokens = set(time_words + location_words + question_words + negations)
         for phrase in subject_phrases + object_phrases:
             processed_tokens.update(phrase)
@@ -508,6 +616,9 @@ class AudioToGlossConverter:
         processed_tokens.update(modals)
         processed_tokens.update(adjectives)
         processed_tokens.update(verb_adverbs)
+        for prep, obj_phrase in prep_phrases:
+            processed_tokens.add(prep)
+            processed_tokens.update(obj_phrase)
 
         for token in clause:
             if (
@@ -518,7 +629,7 @@ class AudioToGlossConverter:
                 glosses.append(self._get_lemma_with_possessive(token))
                 added_tokens.add(token)
 
-        # 9. NEGATION at the end
+        # 11. NEGATION at the end
         for neg in negations:
             if neg not in added_tokens:
                 if "n't" in neg.text.lower():
@@ -532,14 +643,12 @@ class AudioToGlossConverter:
                             glosses.append(neg_gloss)
                     added_tokens.add(neg)
                 else:
-                    # Even if the negation marker doesn't pass _keep_token,
-                    # we still want to add NOT to the glosses
                     if neg.text.lower() in ["not", "n't", "never", "no"]:
                         if "NOT" not in glosses and "NEVER" not in glosses:
                             glosses.append("NOT")
                         added_tokens.add(neg)
 
-        # 10. QUESTION words at the very end
+        # 12. QUESTION words at the very end
         for q in question_words:
             if q not in added_tokens:
                 q_gloss = q.lemma_.upper()
@@ -549,46 +658,6 @@ class AudioToGlossConverter:
 
         return glosses
 
-    def _keep_token(self, token) -> bool:
-        """
-        Determine if a token should be kept in the gloss output.
-        We only keep content words: nouns, verbs, adjectives, adverbs, numbers, pronouns.
-        """
-        keep_pos = {"NOUN", "VERB", "ADJ", "ADV", "NUM", "PRON", "PROPN"}
-
-        if token.pos_ not in keep_pos:
-            return False
-
-        # Filter out function words
-        if token.pos_ in {"DET", "ADP", "CCONJ", "SCONJ", "AUX", "PART"}:
-            return False
-
-        # Exception: keep modal auxiliaries
-        if token.pos_ == "AUX" and token.tag_ == "MD":
-            return True
-
-        # Filter out punctuation and whitespace
-        if token.is_punct or token.is_space:
-            return False
-
-        # Filter out auxiliary verbs
-        if token.lemma_ in ["be", "have", "do"] and token.pos_ in ["AUX", "VERB"]:
-            return False
-
-        # Filter out expletive "it" (like in "it was cold" or "it is raining")
-        if token.text.lower() == "it" and token.pos_ == "PRON":
-            if token.dep_ in ["expl", "nsubj"]:
-                # Check if it's a weather/impersonal construction
-                if token.head.pos_ in ["VERB", "AUX"]:
-                    # Weather verbs or copula
-                    if token.head.lemma_ in ["be", "rain", "snow", "seem", "appear"]:
-                        return False
-                    # Copula with adjective (it was cold)
-                    for child in token.head.children:
-                        if child.pos_ == "ADJ":
-                            return False
-
-        return True
 
     def _get_lemma_with_possessive(self, token) -> str:
         """
@@ -653,6 +722,7 @@ if __name__ == "__main__":
     if converter.load_model():
         test_sentences = [
             # Basic sentences
+            "Hospital after an accident",
             "I am going to the store tomorrow",
             "The dog is not eating his food",
             "She quickly ran to the park",
