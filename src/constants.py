@@ -3,6 +3,7 @@ from pathlib import Path
 # Base Directories
 ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data"
+LOGS_DIR = ROOT_DIR / "logs"
 VIDEOS_DIR = DATA_DIR / "gloss_videos"
 OUTPUT_DIR = DATA_DIR / "output"
 DATASET_DIR = DATA_DIR / "dataset"
@@ -34,8 +35,8 @@ REPRESENTATIVES_LEFT = OUTPUT_DIR / "gesture_metadata" / "representatives_left.j
 # Gesture recognizer model hyperparameters
 DEFAULT_SEQUENCE_LENGTH = 30
 DEFAULT_BATCH_SIZE = 64
-DEFAULT_LEARNING_RATE = 0.001
-DEFAULT_HIDDEN_SIZE = 124
+DEFAULT_LEARNING_RATE = 0.0001
+DEFAULT_HIDDEN_SIZE = 256
 DEFAULT_DROPOUT = 0.1
 DEFAULT_EPOCHS = 30
 
@@ -43,10 +44,3 @@ DEFAULT_EPOCHS = 30
 FRAME_RATE = 30
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-
-WEB_APP_CONFIG = {
-    "frames_to_skip": 2,
-    "use_pose": False,
-    "hand_model_path": MEDIAPIPE_HAND_LANDMARKER_PATH,
-    "pose_model_path": MEDIAPIPE_POSE_LANDMARKER_PATH,
-}

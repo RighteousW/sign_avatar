@@ -133,7 +133,7 @@ class Audio2GlossWidget(QWidget):
             self.update_status_signal.emit("Ready")
         else:
             self.update_status_signal.emit(
-                "Error: Run 'python -m spacy download en_core_web_sm'"
+                "Error: Run 'python3 -m spacy download en_core_web_sm'"
             )
 
     def keyPressEvent(self, event: QKeyEvent):
