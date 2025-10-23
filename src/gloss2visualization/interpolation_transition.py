@@ -8,8 +8,9 @@ import json
 from collections import defaultdict
 import re
 from datetime import datetime
+import random
 
-from ..constants import LANDMARKS_DIR, OUTPUT_DIR
+from ..constants import GESTURE_MODEL_2_SKIP_METADATA_PATH, LANDMARKS_DIR, OUTPUT_DIR, REPRESENTATIVES_LEFT
 
 
 class GestureRepresentativeSelector:
@@ -35,7 +36,6 @@ class GestureRepresentativeSelector:
                 gloss = base_name
 
         return gloss
-
 
     def determine_handedness(self, frames: List[Dict]) -> str:
         """Determine handedness based on first and last 25% of frames"""
@@ -72,7 +72,7 @@ class GestureRepresentativeSelector:
             return "right"
         else:
             return "unknown"
-    
+
     def calculate_hand_consistency(self, frames: List[Dict]) -> Dict[str, float]:
         """Calculate hand consistency metrics to detect flickering"""
         if not frames:
@@ -362,6 +362,22 @@ class GestureTransitionGenerator:
             self.metadata = json.load(f)
         self.representatives = self.metadata["representatives"]
 
+    def select_random_glosses(self, count: int = 20) -> List[str]:
+        """Select random glosses from available representatives"""
+        available_glosses = list(self.representatives.keys())
+
+        if len(available_glosses) < count:
+            print(
+                f"Warning: Only {len(available_glosses)} glosses available, using all of them"
+            )
+            return available_glosses
+
+        selected = random.sample(available_glosses, count)
+        print(
+            f"Randomly selected {len(selected)} glosses from {len(available_glosses)} available"
+        )
+        return selected
+
     def extract_hand_positions(self, frames: List[Dict]) -> np.ndarray:
         """Extract hand positions from frames"""
         positions = []
@@ -600,15 +616,30 @@ def main():
         "generate", help="Generate gesture sequence"
     )
     generate_parser.add_argument(
-        "--metadata", required=True, help="Path to metadata file"
+        "--metadata",
+        default=REPRESENTATIVES_LEFT,
+        help="Path to metadata file",
     )
     generate_parser.add_argument(
-        "--glosses", nargs="+", required=True, help="List of glosses to chain"
+        "--glosses",
+        nargs="*",
+        default=None,
+        help="List of glosses to chain (if not provided, 20 random glosses will be selected)",
+    )
+    generate_parser.add_argument(
+        "--random-count",
+        type=int,
+        default=20,
+        help="Number of random glosses to select if --glosses not provided",
     )
     generate_parser.add_argument(
         "--transition-length", type=int, default=4, help="Transition length in frames"
     )
-    generate_parser.add_argument("--output", required=True, help="Output file path")
+    generate_parser.add_argument(
+        "--output",
+        default=OUTPUT_DIR / "sythesized_interpolation" / "temp_generated_sequence.pkl",
+        help="Output file path",
+    )
 
     args = parser.parse_args()
 
@@ -618,9 +649,23 @@ def main():
 
     elif args.command == "generate":
         generator = GestureTransitionGenerator(args.metadata)
-        demied_glosses = generator.generate_sequence(args.glosses, args.transition_length, args.output)["denied_glosses"]
-        if demied_glosses:
-            print(f"Denied glosses (not found): {', '.join(demied_glosses)}")
+
+        # If no glosses provided, select random ones
+        if not args.glosses:
+            print(
+                f"No glosses specified, selecting {args.random_count} random glosses..."
+            )
+            glosses = generator.select_random_glosses(args.random_count)
+        else:
+            glosses = args.glosses
+
+        result = generator.generate_sequence(
+            glosses, args.transition_length, args.output
+        )
+        denied_glosses = result["denied_glosses"]
+
+        if denied_glosses:
+            print(f"Denied glosses (not found): {', '.join(denied_glosses)}")
 
     else:
         parser.print_help()

@@ -22,6 +22,18 @@ GESTURE_MODEL_2_SKIP_METADATA_PATH = (
     GESTURE_MODEL_DIR / "gesture_model_metadata_2_skip.pkl"
 )
 
+GLOSS2TEXT_MODEL_SYNTHETIC = (
+    LOGS_DIR
+    / "arvanitis2019_arch1_l2_h350_e15_synthetic_20251022_101542"
+    / "best_bleu_model"
+)
+GLOSS2TEXT_MODEL_SYNTHETIC_QUANTIZED = (
+    LOGS_DIR
+    / "arvanitis2019_arch1_l2_h350_e15_synthetic_20251022_101542"
+    / "best_bleu_model"
+    / "quantized"
+)
+
 
 GESTURE_MODEL_PATH = GESTURE_MODEL_DIR / "gesture_model_2_skip.pth"
 MEDIAPIPE_HAND_LANDMARKER_PATH = DEPENDENCY_MODELS_DIR / "hand_landmarker.task"

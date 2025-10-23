@@ -6,6 +6,7 @@ from mediapipe.tasks.python import vision
 import pickle
 import argparse
 from datetime import datetime
+from tqdm import tqdm
 
 from ..constants import (
     LANDMARKS_DIR,
@@ -116,7 +117,6 @@ class LandmarkExtractor:
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            print(f"Error: Could not open video {video_path}")
             return None
 
         filename = os.path.basename(video_path)
@@ -171,7 +171,7 @@ class LandmarkExtractor:
                             }
                             frame_data["hands"].append(hand_data)
                 except Exception as e:
-                    print(f"Error extracting hand landmarks from frame {frame_count}: {e}")
+                    pass  # Silently continue on frame errors
 
             # Pose detection
             if self.pose_landmarker:
@@ -188,7 +188,7 @@ class LandmarkExtractor:
                             )
                         frame_data["pose"] = {"landmarks": landmarks}
                 except Exception as e:
-                    print(f"Error extracting pose landmarks from frame {frame_count}: {e}")
+                    pass  # Silently continue on frame errors
 
             landmarks_data["frames"].append(frame_data)
             frame_count += 1
@@ -244,7 +244,7 @@ class LandmarkExtractor:
                         }
                         frame_data["hands"].append(hand_data)
             except Exception as e:
-                print(f"Error extracting hand landmarks: {e}")
+                pass
 
         # Pose detection
         if self.pose_landmarker:
@@ -261,7 +261,7 @@ class LandmarkExtractor:
                         )
                     frame_data["pose"] = {"landmarks": landmarks}
             except Exception as e:
-                print(f"Error extracting pose landmarks: {e}")
+                pass
 
         return frame_data
 
@@ -297,7 +297,7 @@ class LandmarkExtractor:
                         }
                         frame_data["hands"].append(hand_data)
             except Exception as e:
-                print(f"Error extracting hand landmarks: {e}")
+                pass
 
         # Pose detection
         if self.pose_landmarker:
@@ -312,7 +312,7 @@ class LandmarkExtractor:
                         )
                     frame_data["pose"] = {"landmarks": landmarks}
             except Exception as e:
-                print(f"Error extracting pose landmarks: {e}")
+                pass
 
         return frame_data
 
@@ -332,21 +332,53 @@ class LandmarkExtractor:
         print(f"Hand landmarks: {feature_info['hand_landmarks']}")
         print(f"Pose landmarks: {feature_info['pose_landmarks']}")
         print(f"Total features: {feature_info['total_features']}")
-        print(f"Landmark types: {self.landmark_types}")
+        print(f"Landmark types: {self.landmark_types}\n")
 
-        video_folders = os.listdir(videos_path)
-        video_folders.sort()
+        video_folders = sorted(os.listdir(videos_path))
+
+        # Count total videos for overall progress bar
+        total_videos = 0
+        video_files_by_folder = {}
+        for folder_num in video_folders:
+            folder_path = os.path.join(videos_path, str(folder_num))
+            if os.path.isdir(folder_path):
+                video_files = sorted(
+                    [f for f in os.listdir(folder_path) if f.endswith(".avi")]
+                )
+                video_files_by_folder[folder_num] = video_files
+                total_videos += len(video_files)
+
+        # Overall progress bar
+        overall_pbar = tqdm(
+            total=total_videos,
+            desc="Overall Progress",
+            position=0,
+            leave=True,
+            unit="video",
+        )
 
         for folder_num in video_folders:
             folder_path = os.path.join(videos_path, str(folder_num))
+            if not os.path.isdir(folder_path):
+                continue
+
             output_folder_path = os.path.join(landmarks_path, str(folder_num))
             os.makedirs(output_folder_path, exist_ok=True)
 
-            video_files = [f for f in os.listdir(folder_path) if f.endswith(".avi")]
+            video_files = video_files_by_folder[folder_num]
 
-            for video_file in video_files:
+            # Current gloss/folder progress bar
+            gloss_pbar = tqdm(
+                video_files,
+                desc=f"Gloss {folder_num}",
+                position=1,
+                leave=False,
+                unit="video",
+            )
+
+            for video_file in gloss_pbar:
                 video_path = os.path.join(folder_path, video_file)
-                print(f"Processing: {video_path}")
+                gloss_pbar.set_postfix_str(video_file)
 
                 landmarks_data = self.extract_landmarks_from_video(video_path)
 
@@ -357,16 +389,25 @@ class LandmarkExtractor:
                     with open(output_file_path, "wb") as f:
                         pickle.dump(landmarks_data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-                    print(f"Saved landmarks to: {output_file_path}")
                     self.processing_metadata["total_videos"] += 1
                 else:
-                    print(f"Failed to process: {video_path}")
                     self.processing_metadata["failed_videos"].append(
                         {
                             "video_path": video_path,
                             "error_time": datetime.now().isoformat(),
                         }
                     )
+
+                overall_pbar.update(1)
+
+            gloss_pbar.close()
+
+        overall_pbar.close()
+
+        # Print summary
+        print(f"\n✓ Processed {self.processing_metadata['total_videos']} videos")
+        if self.processing_metadata["failed_videos"]:
+            print(f"✗ Failed: {len(self.processing_metadata['failed_videos'])} videos")
 
     def save_metadata(self):
         """
@@ -435,7 +476,7 @@ def main():
         return
 
     print("Initializing MediaPipe models...")
-    extractor = LandmarkExtractor(args.hand_model, args.pose_model, args.landmark_types)
+    extractor = LandmarkExtractor("pose_landmarks" in args.landmark_types)
 
     print("Starting landmark extraction...")
     extractor.process_video_folder(args.videos_dir, args.output_dir)
@@ -443,7 +484,7 @@ def main():
     # Save metadata files
     extractor.save_metadata()
 
-    print("Landmark extraction complete!")
+    print("\nLandmark extraction complete!")
 
 
 if __name__ == "__main__":

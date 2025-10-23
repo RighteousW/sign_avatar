@@ -21,10 +21,10 @@ from ..constants import (
     DEFAULT_HIDDEN_SIZE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_SEQUENCE_LENGTH,
+    GESTURE_MODEL_DIR,
     GESTURE_MODEL_METADATA_PATH,
     GESTURE_MODEL_PATH,
     LANDMARKS_DIR,
-    TRAINED_MODELS_DIR,
 )
 
 
@@ -462,7 +462,7 @@ class ModelTrainer:
         plt.tight_layout()
         plt.savefig(
             os.path.join(
-                TRAINED_MODELS_DIR, f"training_history_skip_{skip_pattern}.png"
+                GESTURE_MODEL_DIR, f"training_history_skip_{skip_pattern}.png"
             )
         )
         plt.show()
@@ -514,7 +514,7 @@ def evaluate_model(
     plt.xlabel("Predicted Label")
     plt.tight_layout()
     plt.savefig(
-        os.path.join(TRAINED_MODELS_DIR, f"confusion_matrix_skip_{skip_pattern}.png")
+        os.path.join(GESTURE_MODEL_DIR, f"confusion_matrix_skip_{skip_pattern}.png")
     )
     plt.show()
 
@@ -643,8 +643,6 @@ def main():
     )
 
     args = parser.parse_args()
-
-    os.makedirs(TRAINED_MODELS_DIR, exist_ok=True)
 
     model_infos = {}
 

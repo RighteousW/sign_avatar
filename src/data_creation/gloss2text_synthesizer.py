@@ -122,8 +122,9 @@ def main():
     nsl_converter.load_model()
 
     # --- Configuration ---
-    ASL_CSV_FILE = "data/dataset/ASLG-PC12 dataset/train.csv"
-    OUTPUT_FILE = "data/dataset/ASLG-PC12 dataset/synthetic.csv"
+    HQ_ENGLISH_FILE = "data/dataset/high quality english sentences/train.txt"
+    # ASL_CSV_FILE = "data/dataset/ASLG-PC12 dataset/train.csv"
+    OUTPUT_FILE = "data/dataset/high quality english sentences/synthetic_500K.csv"
 
     MAX_SENTENCE_WORDS = 100  # Limit sentence length
     MIN_SENTENCE_WORDS = 1   # Minimum sentence length
@@ -133,32 +134,31 @@ def main():
     print("LOADING DATA FROM MULTIPLE SOURCES")
     print("="*60 + "\n")
 
-    text_sequences_2 = load_text_from_csv(ASL_CSV_FILE)
+    text_sequences_1 = load_first_n_sentences(HQ_ENGLISH_FILE, n_lines=500_000)
+    # text_sequences_2 = load_text_from_csv(ASL_CSV_FILE)
 
     print(f"\n{'='*60}")
-    print(f"RAW SENTENCES LOADED: {len(text_sequences_2):,}")
-    print(f"  - ASL CSV sentences: {len(text_sequences_2):,}")
+    print(f"RAW SENTENCES LOADED: {len(text_sequences_1):,}")
     print(f"{'='*60}\n")
 
-    # # Split and filter sentences
-    # print(f"Splitting long sentences (max {MAX_SENTENCE_WORDS} words)...")
-    # processed_sentences = []
-    # split_count = 0
+    # Split and filter sentences
+    print(f"Splitting long sentences (max {MAX_SENTENCE_WORDS} words)...")
+    processed_sentences = []
+    split_count = 0
 
-    # for text in text_sequences_2:
-    #     split_sents = split_long_sentences(text, max_words=MAX_SENTENCE_WORDS)
+    for text in text_sequences_1:
+        split_sents = split_long_sentences(text, max_words=MAX_SENTENCE_WORDS)
 
-    #     if len(split_sents) > 1:
-    #         split_count += 1
+        if len(split_sents) > 1:
+            split_count += 1
 
-    #     for sent in split_sents:
-    #         if validate_sentence(sent, min_words=MIN_SENTENCE_WORDS, max_words=MAX_SENTENCE_WORDS):
-    #             processed_sentences.append(sent)
+        for sent in split_sents:
+            if validate_sentence(sent, min_words=MIN_SENTENCE_WORDS, max_words=MAX_SENTENCE_WORDS):
+                processed_sentences.append(sent)
 
-    # print(f"Split {split_count:,} long sentences")
-    # print(f"After filtering: {len(processed_sentences):,} valid sentences\n")
+    print(f"Split {split_count:,} long sentences")
+    print(f"After filtering: {len(processed_sentences):,} valid sentences\n")
 
-    processed_sentences = text_sequences_2
     # --- Conversion and Saving ---
     print(f"Starting NSL gloss conversion and saving to {OUTPUT_FILE}...")
     print("="*60 + "\n")

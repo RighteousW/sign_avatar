@@ -562,7 +562,7 @@ class TrainingLogger:
         return report_path
 
 
-def create_confusion_matrix(predictions, references, vocab, top_n=20):
+def create_confusion_matrix(predictions, references, top_n=100):
     """
     Create a confusion matrix for the most common prediction errors.
 
@@ -857,13 +857,19 @@ def train_with_logging(
         epoch_start_time = time.time()
 
         # Training
+        tf_ratio = get_teacher_forcing_ratio(
+            epoch, config["num_epochs"], start_ratio=1.0, end_ratio=0.5
+        )
+
+        print(f"Epoch {epoch+1}: Teacher forcing ratio = {tf_ratio:.3f}")
+
         train_loss = train_epoch(
             model,
             train_dataloader,
             optimizer,
             criterion,
             device,
-            teacher_forcing_ratio=0.5,
+            teacher_forcing_ratio=tf_ratio,
             use_amp=False,
         )
 
@@ -939,7 +945,7 @@ def train_with_logging(
     # Create confusion matrix
     print("Generating confusion matrix...")
     conf_matrix, labels = create_confusion_matrix(
-        final_results["predictions"], final_results["references"], text_vocab, top_n=20
+        final_results["predictions"], final_results["references"], top_n=20
     )
     conf_matrix_path = os.path.join(logger.run_dir, "plots", "confusion_matrix.png")
     plot_confusion_matrix(conf_matrix, labels, conf_matrix_path)
@@ -1282,7 +1288,7 @@ def optimize_for_hardware(device):
 
     else:
         # CPU optimizations, default to 6 threads or 3/4ths of available cores
-        torch.set_num_threads(min(6, int(os.cpu_count()) * 0.75))
+        torch.set_num_threads(min(4, int(os.cpu_count()) * 0.5))
         cpu_count = torch.get_num_threads()
         print(f"Using CPU with {cpu_count} threads")
 
@@ -1392,6 +1398,26 @@ def load_data_from_file(filepath, file_format="txt"):
     return gloss_sequences, text_sequences
 
 
+def get_teacher_forcing_ratio(epoch, total_epochs, start_ratio=1.0, end_ratio=0.5):
+    """
+    Uses cosine annealing for smoother decay.
+    """
+    warmup_epochs = int(0.4 * total_epochs)
+
+    if epoch < warmup_epochs:
+        return start_ratio
+
+    # Cosine annealing decay
+    decay_epochs = total_epochs - warmup_epochs
+    progress = (epoch - warmup_epochs) / decay_epochs
+
+    # Cosine decay from start_ratio to end_ratio
+    cosine_decay = 0.5 * (1 + np.cos(np.pi * progress))
+    current_ratio = end_ratio + (start_ratio - end_ratio) * cosine_decay
+
+    return max(end_ratio, current_ratio)
+
+
 def train_epoch(
     model,
     dataloader,
@@ -1480,30 +1506,23 @@ def translate_sentence(model, sentence, gloss_vocab, text_vocab, device, max_len
 
 if __name__ == "__main__":
     from datetime import datetime
-    MAX_SAMPLE_SIZES = [87_710]
     MIN_FREQS = [5]
 
-    # Fixed hyperparameters (from paper)
+    # Fixed hyperparameters
     BATCH_SIZE = 32
     EMBEDDING_SIZE = None
     DROPOUT = 0.25
     ATTENTION_TYPE = "general"
-    LEARNING_RATE = 0.001  
-    max_samples = MAX_SAMPLE_SIZES[0]
+    LEARNING_RATE = 0.001
+    max_samples = 87_710
 
     param_combinations = [
         (
-            5,
+            3,
             350,
             2,
-            5,
-        ),  # min_freq, hidden_size, num_layers, epochs
-        # (
-        #     5,
-        #     800,
-        #     4,
-        #     10,
-        # ),  # min_freq, hidden_size, num_layers, epochs
+            15,
+        ), # 5 min_freq, 350 hidden, 2 layers, 15 epochs
     ]
 
     total_experiments = len(param_combinations)
@@ -1515,7 +1534,7 @@ if __name__ == "__main__":
     print("\nPaper Architectures:")
     print("  Architecture 1: 2 layers, 350 hidden size, 5 epochs")
     print("  Architecture 2: 4 layers, 800 hidden size, 10 epochs")
-    print(f"\nDataset: ASLG-PC12 ({MAX_SAMPLE_SIZES[0]:,} samples)")
+    print(f"\nDataset: ASLG-PC12 ({max_samples} samples)")
     print(f"Min Frequency: {MIN_FREQS[0]}")
     print(f"Attention Type: {ATTENTION_TYPE}")
     print(f"Learning Rate: {LEARNING_RATE}")
@@ -1528,7 +1547,7 @@ if __name__ == "__main__":
     # ===== STEP 1: LOAD DATASET =====
     print(f"[1/8] Loading {max_samples:,} samples...")
     gloss_sequences, text_sequences = load_data_from_file(
-        "data/dataset/ASLG-PC12 dataset/train.csv", "csv"
+        "data/dataset/MediTOD/utterances.csv", "csv"
     )
     gloss_sequences = gloss_sequences[:max_samples]
     text_sequences = text_sequences[:max_samples]
@@ -1676,7 +1695,7 @@ if __name__ == "__main__":
             print(f"\n[7/8] Training with comprehensive logging...")
 
             # Experiment name matching paper architecture
-            experiment_name = f"arvanitis2019_arch{exp_num}_l{num_layers}_h{hidden_size}_e{num_epochs}"
+            experiment_name = f"MediTOD_arch{exp_num}_l{num_layers}_h{hidden_size}_e{num_epochs}_synthetic"
 
             logger, final_results = train_with_logging(
                 model=model,
@@ -1692,7 +1711,7 @@ if __name__ == "__main__":
                 experiment_name=experiment_name,
             )
 
-            # ===== STEP 8: STORE RESULTS =====
+            # # ===== STEP 8: STORE RESULTS =====
             experiment_result = {
                 "experiment_num": exp_num,
                 "architecture": f"Architecture {exp_num}",
@@ -1723,9 +1742,7 @@ if __name__ == "__main__":
 
             # Load checkpoints for best loss
             best_loss_checkpoint = load_checkpoint(
-                os.path.join(
-                    logger.run_dir, "checkpoints", "best_loss.pth"
-                ), device
+                os.path.join(logger.run_dir, "checkpoints", "best_loss.pth"), device
             )
             # measure inference speed for best loss model
             model.load_state_dict(best_loss_checkpoint["model_state_dict"])
@@ -1740,12 +1757,21 @@ if __name__ == "__main__":
                 config,
                 save_dir=LOGS_DIR / experiment_name / "best_loss_model",
             )
+            model_quantized = torch.quantization.quantize_dynamic(
+                model, {nn.GRU, nn.Linear}, dtype=torch.qint8
+            )
+            # save the model optimized for best loss
+            save_full_model(
+                model,
+                gloss_vocab,
+                text_vocab,
+                config,
+                save_dir=LOGS_DIR / experiment_name / "best_loss_model" / "quantized",
+            )
 
             # Load checkpoints for best BLEU
             best_bleu_checkpoint = load_checkpoint(
-                os.path.join(
-                    logger.run_dir, "checkpoints", "best_bleu.pth"
-                ), device
+                os.path.join(logger.run_dir, "checkpoints", "best_bleu.pth"), device
             )
             # measure inference speed for best bleu model
             model.load_state_dict(best_bleu_checkpoint["model_state_dict"])
@@ -1759,6 +1785,16 @@ if __name__ == "__main__":
                 text_vocab,
                 config,
                 save_dir=LOGS_DIR / experiment_name / "best_bleu_model",
+            )
+            model_quantized = torch.quantization.quantize_dynamic(
+                model, {nn.GRU, nn.Linear}, dtype=torch.qint8
+            )
+            save_full_model(
+                model,
+                gloss_vocab,
+                text_vocab,
+                config,
+                save_dir=LOGS_DIR / experiment_name / "best_bleu_model" / "quantized",
             )
 
         except Exception as e:
