@@ -1340,7 +1340,7 @@ def optimize_for_hardware(device):
 
     else:
         # CPU optimizations, default to 6 threads or 3/4ths of available cores
-        torch.set_num_threads(min(4, int(os.cpu_count()) * 0.5))
+        torch.set_num_threads(4)
         cpu_count = torch.get_num_threads()
         print(f"Using CPU with {cpu_count} threads")
 
@@ -1720,12 +1720,12 @@ def combine_datasets(
 
 if __name__ == "__main__":
     from datetime import datetime
-    MIN_FREQ = 3
+    MIN_FREQ = 5
 
     # Fixed hyperparameters
     BATCH_SIZE = 32
     EMBEDDING_SIZE = None
-    DROPOUT = 0.35
+    DROPOUT = 0.5  # High dropout needed for small dataset (~19K samples)
     ATTENTION_TYPE = "general"
     LEARNING_RATE = 0.001
     max_samples = 87_710
@@ -1733,7 +1733,7 @@ if __name__ == "__main__":
     param_combinations = [
         (
             MIN_FREQ,
-            350,
+            128,
             2,
             10,
         ),
@@ -1742,21 +1742,13 @@ if __name__ == "__main__":
     total_experiments = len(param_combinations)
 
     print("=" * 70)
-    print("GLOSS-TO-TEXT TRAINING - MULTI-DATASET APPROACH")
+    print("GLOSS-TO-TEXT TRAINING - MediTOD BASELINE")
     print("=" * 70)
     print(f"\nTotal experiments to run: {total_experiments}")
-    print("\nDataset Strategy:")
-    print("  Primary Dataset:")
-    print("    - MediTOD (medical domain, ~19K samples)")
-    print("    - Training: 80% weighted 2x")
-    print("    - Validation: 20% (MediTOD-only evaluation)")
-    print("\n  Supplementary Datasets:")
-    print("    - High-quality English synthetic: 30K random samples")
-    print("    - ASLG-PC12 synthetic: 30K random samples")
-    print("    - Total supplementary: ~60K samples")
-    print("\n  Combined Training Set:")
-    print("    - MediTOD×2 + HQ synthetic + ASLG synthetic")
-    print("    - Expected: ~90K total training samples")
+    print("\nDataset:")
+    print("  - MediTOD (medical domain)")
+    print("  - Training: 80% split")
+    print("  - Validation: 20% split")
     print(f"\nHyperparameters:")
     print(f"  Min Frequency: {MIN_FREQ}")
     print(f"  Attention Type: {ATTENTION_TYPE}")
@@ -1768,57 +1760,23 @@ if __name__ == "__main__":
     all_results = []
     overall_start_time = time.time()
 
-    # ===== STEP 1: LOAD DATASETS =====
-    print(f"[1/8] Loading datasets...")
-    print("=" * 60)
+   # ===== STEP 1: LOAD DATASET =====
+    print(f"[1/8] Loading MediTOD dataset...")
 
-    # Load primary dataset (MediTOD) - ALL samples
-    print(f"   Loading MediTOD dataset...")
-    meditod_gloss, meditod_text = load_data_from_file(
+    gloss_sequences, text_sequences = load_data_from_file(
         "data/dataset/MediTOD/utterances.csv", "csv"
     )
-    print(f"   ✓ MediTOD: {len(meditod_gloss)} samples")
+    print(f"   ✓ Loaded {len(gloss_sequences)} samples")
 
-    # Load supplemental datasets (30K from each)
-    print(f"\n   Loading supplementary datasets (30K each)...")
-    supplemental_gloss, supplemental_text = load_synthetic_datasets(
-        hq_path="data/dataset/high quality english sentences/synthetic_500K.csv",
-        aslg_path="data/dataset/ASLG-PC12 dataset/synthetic.csv",
-        samples_per_dataset=30000
-    )
-    print(f"   ✓ Total supplementary: {len(supplemental_gloss)} samples")
+    # Split into train/validation
+    split_idx = int(0.8 * len(gloss_sequences))
+    train_gloss = gloss_sequences[:split_idx]
+    train_text = text_sequences[:split_idx]
+    val_gloss = gloss_sequences[split_idx:]
+    val_text = text_sequences[split_idx:]
 
-    # Split MediTOD first (validation will be MediTOD-only)
-    print(f"\n   Splitting MediTOD for train/validation...")
-    meditod_split_idx = int(0.8 * len(meditod_gloss))
-    meditod_train_gloss = meditod_gloss[:meditod_split_idx]
-    meditod_train_text = meditod_text[:meditod_split_idx]
-    val_gloss = meditod_gloss[meditod_split_idx:]  # Validation is MediTOD-only
-    val_text = meditod_text[meditod_split_idx:]
-
-    print(f"\n   Dataset Composition:")
-    print(f"   {'─' * 58}")
-    print(f"   MediTOD (training):        {len(meditod_train_gloss):>6} samples")
-    print(f"   MediTOD (validation):      {len(val_gloss):>6} samples (MediTOD-only)")
-    print(f"   HQ English synthetic:      ~30,000 samples")
-    print(f"   ASLG-PC12 synthetic:       ~30,000 samples")
-    print(f"   {'─' * 58}")
-
-    # Combine training data (MediTOD + supplementary)
-    # Weight MediTOD 2x to emphasize medical domain
-    print(f"\n   Combining datasets (MediTOD weighted 2x)...")
-    train_gloss, train_text = combine_datasets(
-        meditod_train_gloss, meditod_train_text,
-        supplemental_gloss, supplemental_text,
-        primary_weight=2.0
-    )
-
-    print(f"\n   {'=' * 58}")
-    print(f"   FINAL TRAINING SET:        {len(train_gloss):>6} samples")
-    print(f"   FINAL VALIDATION SET:      {len(val_gloss):>6} samples")
-    print(f"   {'=' * 58}")
-    print(f"   (Training includes MediTOD×2 + HQ + ASLG-PC12)")
-    print(f"   (Validation is MediTOD-only for domain evaluation)")
+    print(f"\n   Training samples:   {len(train_gloss)}")
+    print(f"   Validation samples: {len(val_gloss)}")
 
     # Run all experiments
     for exp_num, (
@@ -1865,28 +1823,21 @@ if __name__ == "__main__":
             OUTPUT_DIM = len(text_vocab)
 
             config = {
-                "input_dim": INPUT_DIM,
-                "output_dim": OUTPUT_DIM,
-                "embedding_size": embedding_size,
-                "hidden_size": hidden_size,
-                "num_layers": num_layers,
-                "dropout": DROPOUT,
-                "attention_type": ATTENTION_TYPE,
-                "batch_size": BATCH_SIZE,
-                "learning_rate": LEARNING_RATE,
-                "num_epochs": num_epochs,
-                "max_samples": max_samples,
-                "min_freq": min_freq,
-                "dataset_composition": {
-                    "meditod_total": len(meditod_gloss),
-                    "meditod_train": len(meditod_train_gloss),
-                    "meditod_val": len(val_gloss),
-                    "supplementary_total": len(supplemental_gloss),
-                    "combined_train": len(train_gloss),
-                    "meditod_weight": 2.0,
-                    "datasets": ["MediTOD×2", "HQ-English-30K", "ASLG-PC12-30K"],
-                },
-            }
+    "input_dim": INPUT_DIM,
+    "output_dim": OUTPUT_DIM,
+    "embedding_size": embedding_size,
+    "hidden_size": hidden_size,
+    "num_layers": num_layers,
+    "dropout": DROPOUT,
+    "attention_type": ATTENTION_TYPE,
+    "batch_size": BATCH_SIZE,
+    "learning_rate": LEARNING_RATE,
+    "num_epochs": num_epochs,
+    "min_freq": min_freq,
+    "dataset": "MediTOD",
+    "train_samples": len(train_gloss),
+    "val_samples": len(val_gloss),
+}
 
             print(f"   Architecture: {num_layers} layers x {hidden_size} hidden units")
             print(f"   Attention type: {config['attention_type']}")
@@ -1963,7 +1914,7 @@ if __name__ == "__main__":
             print(f"\n[7/8] Training with comprehensive logging...")
 
             # Experiment name matching paper architecture
-            experiment_name = f"Multi_MediTOD+HQ+ASLG_arch{exp_num}_l{num_layers}_h{hidden_size}_e{num_epochs}"
+            experiment_name = f"MediTOD_baseline_l{num_layers}_h{hidden_size}_e{num_epochs}"
             
             logger, final_results = train_with_logging(
                 model=model,
