@@ -10,4 +10,5 @@ __all__ = [
     "model_training",
     "video2gloss",
     "constants",
+    "gui"
 ]

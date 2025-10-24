@@ -240,7 +240,8 @@ class Gloss2VisualizationWidget(QWidget):
 
     def _generate(self, glosses):
         try:
-            landmark_file = tempfile.mkstemp(suffix=".pkl")
+            fd, landmark_file = tempfile.mkstemp(suffix=".pkl")
+            os.close(fd)
             glosses_lower = [g.lower() for g in glosses]
             result = self.generator.generate_sequence(glosses_lower, 4, landmark_file)
 

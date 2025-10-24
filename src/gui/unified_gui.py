@@ -39,7 +39,7 @@ class UnifiedNSLWidget(QTabWidget):
         self.gloss2viz = Gloss2VisualizationWidget()
         self.addTab(self.gloss2viz, "Glosses → Visualization")
 
-        # Pipeline 3: Audio → Visualization
+        # Pipeline 3: Audio → Visualization (Unified)
         self.audio2viz = Audio2VisualizationWidget()
         self.addTab(self.audio2viz, "Audio → Visualization")
 
@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Namibian Sign Language - Unified Translation System")
-        self.setGeometry(100, 100, 900, 800)
+        self.setGeometry(60, 60, 900, 800)
 
         try:
             from .styles import get_dark_stylesheet

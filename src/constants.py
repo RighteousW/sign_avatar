@@ -3,7 +3,6 @@ from pathlib import Path
 # Base Directories
 ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data"
-LOGS_DIR = ROOT_DIR / "logs"
 VIDEOS_DIR = DATA_DIR / "gloss_videos"
 OUTPUT_DIR = DATA_DIR / "output"
 DATASET_DIR = DATA_DIR / "dataset"
@@ -11,6 +10,7 @@ LANDMARKS_DIR = DATASET_DIR / "landmarks"
 MODELS_DIR = ROOT_DIR / "models"
 DEPENDENCY_MODELS_DIR = MODELS_DIR / "dependencies"
 TRAINED_MODELS_DIR = MODELS_DIR / "trained_models"
+LOGS_DIR = TRAINED_MODELS_DIR / "gloss2text_logs"
 GESTURE_MODEL_DIR = TRAINED_MODELS_DIR / "gesture_recognizer"
 
 # Model Paths
