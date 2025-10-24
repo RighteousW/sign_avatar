@@ -51,6 +51,8 @@ import pandas as pd
 from datetime import datetime
 import sys
 
+from tqdm import tqdm
+
 from ..constants import LOGS_DIR
 
 
@@ -287,7 +289,7 @@ class GlossTextDataset(Dataset):
 class TrainingLogger:
     """Comprehensive training logger for research documentation"""
 
-    def __init__(self, experiment_name, log_dir="logs"):
+    def __init__(self, experiment_name, log_dir=LOGS_DIR):
         self.experiment_name = experiment_name
         self.log_dir = log_dir
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -562,6 +564,25 @@ class TrainingLogger:
         return report_path
 
 
+class EarlyStopping:
+    """Early stopping based on BLEU score plateau"""
+
+    def __init__(self, patience=3, min_delta=0.002):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.best_bleu = 0
+
+    def should_stop(self, bleu_score):
+        if bleu_score > self.best_bleu + self.min_delta:
+            self.best_bleu = bleu_score
+            self.counter = 0
+            return False
+        else:
+            self.counter += 1
+            return self.counter >= self.patience
+
+
 def create_confusion_matrix(predictions, references, top_n=100):
     """
     Create a confusion matrix for the most common prediction errors.
@@ -725,7 +746,13 @@ def evaluate_model_detailed(
     idx_to_gloss = {v: k for k, v in gloss_vocab.items()}
 
     with torch.no_grad():
-        for src, trg in dataloader:
+        eval_pbar = tqdm(
+            dataloader,
+            desc="Evaluating BLEU",
+            leave=False,
+            bar_format="{l_bar}{bar:30}{r_bar}",
+        )
+        for src, trg in eval_pbar:
             batch_size = src.size(0)
             src = src.to(device)
 
@@ -746,23 +773,15 @@ def evaluate_model_detailed(
                     if idx.item() != gloss_vocab["<PAD>"]
                 ]
 
-                for _ in range(50):  # max length
-                    input_token = (
-                        torch.LongTensor([trg_indices[-1]]).unsqueeze(0).to(device)
-                    )
-                    output, hid_single, _ = model.decoder(
-                        input_token, hid_single, enc_out_single
-                    )
-                    pred_token = output.argmax(1).item()
-                    trg_indices.append(pred_token)
-
-                    if pred_token == text_vocab["<EOS>"]:
-                        break
+                # Use beam search for better predictions
+                trg_indices = beam_search_decode(
+                    model, src_single, text_vocab, device, beam_width=5, max_len=50
+                )
 
                 # Convert to words
                 pred_words = [
                     idx_to_text[idx]
-                    for idx in trg_indices[1:-1]
+                    for idx in trg_indices
                     if idx in idx_to_text
                     and idx_to_text[idx] not in ["<PAD>", "<SOS>", "<EOS>"]
                 ]
@@ -783,6 +802,7 @@ def evaluate_model_detailed(
                         logger.log_error(
                             gloss_input, " ".join(pred_words), " ".join(ref_words)
                         )
+        eval_pbar.close()
 
     # Calculate BLEU scores
     bleu_scores = calculate_bleu(predictions, references)
@@ -849,11 +869,18 @@ def train_with_logging(
     best_loss = float("inf")
     best_bleu = 0.0
     train_start_time = time.time()
+    early_stopping = EarlyStopping(patience=3, min_delta=0.002)
 
     print(f"\nStarting training for {config['num_epochs']} epochs...")
     print("=" * 60)
 
-    for epoch in range(config["num_epochs"]):
+    epoch_pbar = tqdm(
+        range(config["num_epochs"]),
+        desc="Overall Progress",
+        bar_format="{l_bar}{bar:30}{r_bar}",
+    )
+
+    for epoch in epoch_pbar:
         epoch_start_time = time.time()
 
         # Training
@@ -877,7 +904,13 @@ def train_with_logging(
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for src, trg in val_dataloader:
+            val_pbar = tqdm(
+                val_dataloader,
+                desc="Validation",
+                leave=False,
+                bar_format="{l_bar}{bar:30}{r_bar}",
+            )
+            for src, trg in val_pbar:
                 src, trg = src.to(device), trg.to(device)
                 output = model(src, trg, teacher_forcing_ratio=0)
                 output_dim = output.shape[-1]
@@ -885,6 +918,8 @@ def train_with_logging(
                 trg_flat = trg[:, 1:].reshape(-1)
                 loss = criterion(output, trg_flat)
                 val_loss += loss.item()
+                val_pbar.set_postfix({"val_loss": f"{loss.item():.4f}"})
+            val_pbar.close()
 
         val_loss = val_loss / len(val_dataloader)
         scheduler.step(val_loss)
@@ -907,8 +942,18 @@ def train_with_logging(
             epoch_time,
         )
 
-        # Print progress
-        print(
+        # Update overall progress bar
+        epoch_pbar.set_postfix(
+            {
+                "TLoss": f"{train_loss:.4f}",
+                "VLoss": f"{val_loss:.4f}",
+                "BLEU4": f'{eval_results["bleu_scores"]["BLEU-4"]:.4f}',
+                "Time": f"{epoch_time:.0f}s",
+            }
+        )
+
+        # Print detailed progress (still keep this for logging)
+        tqdm.write(
             f"Epoch {epoch+1}/{config['num_epochs']} | "
             f"Train Loss: {train_loss:.4f} | "
             f"Val Loss: {val_loss:.4f} | "
@@ -923,7 +968,7 @@ def train_with_logging(
                 logger.run_dir, "checkpoints", "best_loss.pth"
             )
             save_checkpoint(model, optimizer, epoch, val_loss, config, checkpoint_path)
-            print(f"   ✓ Best loss model saved")
+            tqdm.write(f"   ✓ Best loss model saved")
 
         if eval_results["bleu_scores"]["BLEU-4"] > best_bleu:
             best_bleu = eval_results["bleu_scores"]["BLEU-4"]
@@ -931,7 +976,14 @@ def train_with_logging(
                 logger.run_dir, "checkpoints", "best_bleu.pth"
             )
             save_checkpoint(model, optimizer, epoch, val_loss, config, checkpoint_path)
-            print(f"   ✓ Best BLEU model saved")
+            tqdm.write(f"   ✓ Best BLEU model saved")
+
+        # Check early stopping
+        if early_stopping.should_stop(eval_results["bleu_scores"]["BLEU-4"]):
+            tqdm.write(f"\n   Early stopping triggered - BLEU not improving")
+            tqdm.write(f"   Best BLEU-4: {best_bleu:.4f}")
+            break
+    epoch_pbar.close()
 
     total_train_time = time.time() - train_start_time
 
@@ -1356,7 +1408,7 @@ def load_data_from_file(filepath, file_format="txt"):
 
     if file_format == "txt":
         with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
+            for line in tqdm(f, desc=f"Loading {filepath.split('/')[-1]}", leave=False):
                 line = line.strip()
                 if not line:
                     continue
@@ -1378,7 +1430,13 @@ def load_data_from_file(filepath, file_format="txt"):
     elif file_format == "csv":
         with open(filepath, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            for row in reader:
+
+            # Get total rows for progress bar
+            rows = list(reader)
+
+            for row in tqdm(
+                rows, desc=f"Loading {filepath.split('/')[-1]}", leave=False
+            ):
                 # Handle different possible column names for ASLG-PC12
                 gloss_text = row.get("gloss", row.get("Gloss", row.get("sign", "")))
                 text_text = row.get("text", row.get("Text", row.get("english", "")))
@@ -1398,22 +1456,19 @@ def load_data_from_file(filepath, file_format="txt"):
     return gloss_sequences, text_sequences
 
 
-def get_teacher_forcing_ratio(epoch, total_epochs, start_ratio=1.0, end_ratio=0.5):
+def get_teacher_forcing_ratio(epoch, total_epochs, start_ratio=1.0, end_ratio=0.3):
     """
-    Uses cosine annealing for smoother decay.
+    exponential decay for better exposure to model predictions.
     """
-    warmup_epochs = int(0.4 * total_epochs)
+    warmup_epochs = int(0.2 * total_epochs)
 
     if epoch < warmup_epochs:
         return start_ratio
 
-    # Cosine annealing decay
+    # Exponential decay
     decay_epochs = total_epochs - warmup_epochs
     progress = (epoch - warmup_epochs) / decay_epochs
-
-    # Cosine decay from start_ratio to end_ratio
-    cosine_decay = 0.5 * (1 + np.cos(np.pi * progress))
-    current_ratio = end_ratio + (start_ratio - end_ratio) * cosine_decay
+    current_ratio = start_ratio * ((end_ratio / start_ratio) ** progress)
 
     return max(end_ratio, current_ratio)
 
@@ -1426,6 +1481,7 @@ def train_epoch(
     device,
     teacher_forcing_ratio=0.5,
     use_amp=False,
+    accumulation_steps=4,  # Effective batch size = 32 * 4 = 128
 ):
     model.train()
     epoch_loss = 0
@@ -1433,7 +1489,14 @@ def train_epoch(
     # For mixed precision training
     scaler = torch.cuda.amp.GradScaler() if use_amp else None
 
-    for src, trg in dataloader:
+    optimizer.zero_grad()
+
+    # Add progress bar
+    pbar = tqdm(
+        dataloader, desc="Training", leave=False, bar_format="{l_bar}{bar:30}{r_bar}"
+    )
+
+    for batch_idx, (src, trg) in enumerate(pbar):
         src, trg = src.to(device), trg.to(device)
 
         optimizer.zero_grad()
@@ -1461,8 +1524,12 @@ def train_epoch(
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-        epoch_loss += loss.item()
+        epoch_loss += loss.item() * accumulation_steps
 
+        # Update progress bar with current loss
+        pbar.set_postfix({"loss": f"{loss.item() * accumulation_steps:.4f}"})
+
+    pbar.close()
     return epoch_loss / len(dataloader)
 
 
@@ -1504,64 +1571,254 @@ def translate_sentence(model, sentence, gloss_vocab, text_vocab, device, max_len
     return output_sentence
 
 
+def beam_search_decode(model, src, text_vocab, device, beam_width=5, max_len=50):
+    """
+    Beam search for better sequence generation during evaluation
+
+    Args:
+        model: Seq2SeqWithAttention model
+        src: Source tensor (1, src_len)
+        text_vocab: Text vocabulary
+        device: torch device
+        beam_width: Number of beams to maintain
+        max_len: Maximum sequence length
+
+    Returns:
+        List of token indices (best sequence)
+    """
+    model.eval()
+
+    with torch.no_grad():
+        encoder_outputs, hidden = model.encoder(src)
+
+        # Initialize beam: (sequence, score, hidden)
+        beams = [([text_vocab["<SOS>"]], 0.0, hidden)]
+
+        for _ in range(max_len):
+            new_beams = []
+
+            for seq, score, hid in beams:
+                if seq[-1] == text_vocab["<EOS>"]:
+                    new_beams.append((seq, score, hid))
+                    continue
+
+                input_token = torch.LongTensor([seq[-1]]).unsqueeze(0).to(device)
+                output, new_hid, _ = model.decoder(input_token, hid, encoder_outputs)
+
+                # Get top k predictions
+                log_probs = torch.log_softmax(output, dim=1)
+                topk_probs, topk_indices = torch.topk(log_probs, beam_width)
+
+                for prob, idx in zip(topk_probs[0], topk_indices[0]):
+                    new_seq = seq + [idx.item()]
+                    new_score = score + prob.item()
+                    new_beams.append((new_seq, new_score, new_hid))
+
+            # Keep top beam_width beams
+            beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
+
+            # Check if all beams ended
+            if all(seq[-1] == text_vocab["<EOS>"] for seq, _, _ in beams):
+                break
+
+        # Return best sequence (remove SOS and EOS)
+        best_seq = beams[0][0]
+        if best_seq[-1] == text_vocab["<EOS>"]:
+            best_seq = best_seq[1:-1]
+        else:
+            best_seq = best_seq[1:]
+
+        return best_seq
+
+
+def load_synthetic_datasets(hq_path, aslg_path, samples_per_dataset=30000):
+    """
+    Load pre-processed synthetic gloss-text pairs from CSV files.
+
+    Args:
+        hq_path: Path to high-quality English sentences synthetic CSV
+        aslg_path: Path to ASLG-PC12 synthetic CSV
+        samples_per_dataset: Number of samples to randomly select from each
+
+    Returns:
+        gloss_sequences, text_sequences (combined from both datasets)
+    """
+    all_gloss = []
+    all_text = []
+
+    # Load high-quality sentences synthetic
+    print(f"   Loading high-quality synthetic from: {hq_path}")
+    try:
+        hq_gloss, hq_text = load_data_from_file(hq_path, "csv")
+
+        # Randomly sample
+        if len(hq_gloss) > samples_per_dataset:
+            indices = random.sample(range(len(hq_gloss)), samples_per_dataset)
+            hq_gloss = [hq_gloss[i] for i in indices]
+            hq_text = [hq_text[i] for i in indices]
+
+        all_gloss.extend(hq_gloss)
+        all_text.extend(hq_text)
+        print(f"   High-quality synthetic: {len(hq_gloss)} samples")
+    except Exception as e:
+        print(f"   ⚠ Warning: Could not load {hq_path}: {e}")
+
+    # Load ASLG-PC12 synthetic
+    print(f"   Loading ASLG-PC12 synthetic from: {aslg_path}")
+    try:
+        aslg_gloss, aslg_text = load_data_from_file(aslg_path, "csv")
+
+        # Randomly sample
+        if len(aslg_gloss) > samples_per_dataset:
+            indices = random.sample(range(len(aslg_gloss)), samples_per_dataset)
+            aslg_gloss = [aslg_gloss[i] for i in indices]
+            aslg_text = [aslg_text[i] for i in indices]
+
+        all_gloss.extend(aslg_gloss)
+        all_text.extend(aslg_text)
+        print(f"   ASLG-PC12 synthetic: {len(aslg_gloss)} samples")
+    except Exception as e:
+        print(f"   ⚠ Warning: Could not load {aslg_path}: {e}")
+
+    print(f"   Total supplementary samples: {len(all_gloss)}")
+    return all_gloss, all_text
+
+
+def combine_datasets(
+    primary_gloss,
+    primary_text,
+    supplemental_gloss,
+    supplemental_text,
+    primary_weight=2.0,
+):
+    """
+    Combine primary (MediTOD) and supplemental datasets.
+
+    Args:
+        primary_gloss/text: Primary dataset sequences
+        supplemental_gloss/text: Supplemental dataset sequences
+        primary_weight: How many times to include primary data (for emphasis)
+
+    Returns:
+        Combined gloss_sequences, text_sequences
+    """
+    # Repeat primary data based on weight
+    combined_gloss = primary_gloss * int(primary_weight)
+    combined_text = primary_text * int(primary_weight)
+
+    # Add supplemental data
+    combined_gloss.extend(supplemental_gloss)
+    combined_text.extend(supplemental_text)
+
+    # Shuffle combined data
+    combined = list(zip(combined_gloss, combined_text))
+    random.shuffle(combined)
+    combined_gloss, combined_text = zip(*combined)
+
+    return list(combined_gloss), list(combined_text)
+
+
 if __name__ == "__main__":
     from datetime import datetime
-    MIN_FREQS = [5]
+    MIN_FREQ = 3
 
     # Fixed hyperparameters
     BATCH_SIZE = 32
     EMBEDDING_SIZE = None
-    DROPOUT = 0.25
+    DROPOUT = 0.35
     ATTENTION_TYPE = "general"
     LEARNING_RATE = 0.001
     max_samples = 87_710
 
     param_combinations = [
         (
-            3,
+            MIN_FREQ,
             350,
             2,
-            15,
-        ), # 5 min_freq, 350 hidden, 2 layers, 15 epochs
+            10,
+        ),
     ]
 
     total_experiments = len(param_combinations)
 
     print("=" * 70)
-    print("GLOSS-TO-TEXT TRAINING - REPLICATING ARVANITIS ET AL. (2019)")
+    print("GLOSS-TO-TEXT TRAINING - MULTI-DATASET APPROACH")
     print("=" * 70)
     print(f"\nTotal experiments to run: {total_experiments}")
-    print("\nPaper Architectures:")
-    print("  Architecture 1: 2 layers, 350 hidden size, 5 epochs")
-    print("  Architecture 2: 4 layers, 800 hidden size, 10 epochs")
-    print(f"\nDataset: ASLG-PC12 ({max_samples} samples)")
-    print(f"Min Frequency: {MIN_FREQS[0]}")
-    print(f"Attention Type: {ATTENTION_TYPE}")
-    print(f"Learning Rate: {LEARNING_RATE}")
+    print("\nDataset Strategy:")
+    print("  Primary Dataset:")
+    print("    - MediTOD (medical domain, ~19K samples)")
+    print("    - Training: 80% weighted 2x")
+    print("    - Validation: 20% (MediTOD-only evaluation)")
+    print("\n  Supplementary Datasets:")
+    print("    - High-quality English synthetic: 30K random samples")
+    print("    - ASLG-PC12 synthetic: 30K random samples")
+    print("    - Total supplementary: ~60K samples")
+    print("\n  Combined Training Set:")
+    print("    - MediTOD×2 + HQ synthetic + ASLG synthetic")
+    print("    - Expected: ~90K total training samples")
+    print(f"\nHyperparameters:")
+    print(f"  Min Frequency: {MIN_FREQ}")
+    print(f"  Attention Type: {ATTENTION_TYPE}")
+    print(f"  Learning Rate: {LEARNING_RATE}")
+    print(f"  Dropout: {DROPOUT}")
     print("\n" + "=" * 70)
 
     # Track all results
     all_results = []
     overall_start_time = time.time()
 
-    # ===== STEP 1: LOAD DATASET =====
-    print(f"[1/8] Loading {max_samples:,} samples...")
-    gloss_sequences, text_sequences = load_data_from_file(
+    # ===== STEP 1: LOAD DATASETS =====
+    print(f"[1/8] Loading datasets...")
+    print("=" * 60)
+
+    # Load primary dataset (MediTOD) - ALL samples
+    print(f"   Loading MediTOD dataset...")
+    meditod_gloss, meditod_text = load_data_from_file(
         "data/dataset/MediTOD/utterances.csv", "csv"
     )
-    gloss_sequences = gloss_sequences[:max_samples]
-    text_sequences = text_sequences[:max_samples]
-    print(f"   Loaded {len(gloss_sequences)} total samples")
+    print(f"   ✓ MediTOD: {len(meditod_gloss)} samples")
 
-    # Split into train/validation
-    split_idx = int(0.8 * len(gloss_sequences))
-    train_gloss = gloss_sequences[:split_idx]
-    train_text = text_sequences[:split_idx]
-    val_gloss = gloss_sequences[split_idx:]
-    val_text = text_sequences[split_idx:]
+    # Load supplemental datasets (30K from each)
+    print(f"\n   Loading supplementary datasets (30K each)...")
+    supplemental_gloss, supplemental_text = load_synthetic_datasets(
+        hq_path="data/dataset/high quality english sentences/synthetic_500K.csv",
+        aslg_path="data/dataset/ASLG-PC12 dataset/synthetic.csv",
+        samples_per_dataset=30000
+    )
+    print(f"   ✓ Total supplementary: {len(supplemental_gloss)} samples")
 
-    print(f"   Training samples: {len(train_gloss)}")
-    print(f"   Validation samples: {len(val_gloss)}")
+    # Split MediTOD first (validation will be MediTOD-only)
+    print(f"\n   Splitting MediTOD for train/validation...")
+    meditod_split_idx = int(0.8 * len(meditod_gloss))
+    meditod_train_gloss = meditod_gloss[:meditod_split_idx]
+    meditod_train_text = meditod_text[:meditod_split_idx]
+    val_gloss = meditod_gloss[meditod_split_idx:]  # Validation is MediTOD-only
+    val_text = meditod_text[meditod_split_idx:]
+
+    print(f"\n   Dataset Composition:")
+    print(f"   {'─' * 58}")
+    print(f"   MediTOD (training):        {len(meditod_train_gloss):>6} samples")
+    print(f"   MediTOD (validation):      {len(val_gloss):>6} samples (MediTOD-only)")
+    print(f"   HQ English synthetic:      ~30,000 samples")
+    print(f"   ASLG-PC12 synthetic:       ~30,000 samples")
+    print(f"   {'─' * 58}")
+
+    # Combine training data (MediTOD + supplementary)
+    # Weight MediTOD 2x to emphasize medical domain
+    print(f"\n   Combining datasets (MediTOD weighted 2x)...")
+    train_gloss, train_text = combine_datasets(
+        meditod_train_gloss, meditod_train_text,
+        supplemental_gloss, supplemental_text,
+        primary_weight=2.0
+    )
+
+    print(f"\n   {'=' * 58}")
+    print(f"   FINAL TRAINING SET:        {len(train_gloss):>6} samples")
+    print(f"   FINAL VALIDATION SET:      {len(val_gloss):>6} samples")
+    print(f"   {'=' * 58}")
+    print(f"   (Training includes MediTOD×2 + HQ + ASLG-PC12)")
+    print(f"   (Validation is MediTOD-only for domain evaluation)")
 
     # Run all experiments
     for exp_num, (
@@ -1620,6 +1877,15 @@ if __name__ == "__main__":
                 "num_epochs": num_epochs,
                 "max_samples": max_samples,
                 "min_freq": min_freq,
+                "dataset_composition": {
+                    "meditod_total": len(meditod_gloss),
+                    "meditod_train": len(meditod_train_gloss),
+                    "meditod_val": len(val_gloss),
+                    "supplementary_total": len(supplemental_gloss),
+                    "combined_train": len(train_gloss),
+                    "meditod_weight": 2.0,
+                    "datasets": ["MediTOD×2", "HQ-English-30K", "ASLG-PC12-30K"],
+                },
             }
 
             print(f"   Architecture: {num_layers} layers x {hidden_size} hidden units")
@@ -1682,7 +1948,9 @@ if __name__ == "__main__":
             optimizer = torch.optim.Adamax(
                 model.parameters(), lr=config["learning_rate"]
             )
-            criterion = nn.CrossEntropyLoss(ignore_index=text_vocab["<PAD>"])
+            criterion = nn.CrossEntropyLoss(
+                ignore_index=text_vocab["<PAD>"], label_smoothing=0.1
+            )
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, "min", patience=2, factor=0.5
             )
@@ -1695,8 +1963,8 @@ if __name__ == "__main__":
             print(f"\n[7/8] Training with comprehensive logging...")
 
             # Experiment name matching paper architecture
-            experiment_name = f"MediTOD_arch{exp_num}_l{num_layers}_h{hidden_size}_e{num_epochs}_synthetic"
-
+            experiment_name = f"Multi_MediTOD+HQ+ASLG_arch{exp_num}_l{num_layers}_h{hidden_size}_e{num_epochs}"
+            
             logger, final_results = train_with_logging(
                 model=model,
                 train_dataloader=train_dataloader,
@@ -1835,10 +2103,10 @@ if __name__ == "__main__":
 
     # Save summary results
     summary_path = os.path.join(
-        "logs",
+        LOGS_DIR,
         f"arvanitis2019_replication_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
     )
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
 
     with open(summary_path, "w") as f:
         json.dump(
@@ -1850,7 +2118,7 @@ if __name__ == "__main__":
                     "architecture_1": "2 layers, 350 hidden, 5 epochs",
                     "architecture_2": "4 layers, 800 hidden, 10 epochs",
                     "dataset": "ASLG-PC12",
-                    "min_freq": MIN_FREQS[0],
+                    "min_freq": MIN_FREQ,
                     "attention_type": ATTENTION_TYPE,
                 },
                 "results": all_results,
