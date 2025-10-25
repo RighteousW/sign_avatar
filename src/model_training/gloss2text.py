@@ -591,7 +591,7 @@ if __name__ == "__main__":
         "data/dataset/high quality english sentences/synthetic_500K.csv",
         "data/dataset/ASLG-PC12 dataset/synthetic.csv",
     ]
-    SAMPLES_PER_SUPPLEMENTARY = 30000  # 30K from each
+    SAMPLES_PER_SUPPLEMENTARY = 10000  # Number of samples to draw from each supplementary dataset
 
     EMBED_SIZE = 256
     HIDDEN_SIZE = 256
@@ -599,8 +599,8 @@ if __name__ == "__main__":
     DROPOUT = 0.5
     BATCH_SIZE = 8
     LEARNING_RATE = 0.0005
-    NUM_EPOCHS = 15
-    MIN_FREQ = 2
+    NUM_EPOCHS = 10
+    MIN_FREQ = 4
     MAX_LEN = 50
     EARLY_STOPPING_PATIENCE = 3
 
