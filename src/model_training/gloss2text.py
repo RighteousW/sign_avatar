@@ -1720,22 +1720,23 @@ def combine_datasets(
 
 if __name__ == "__main__":
     from datetime import datetime
-    MIN_FREQ = 5
+
+    MIN_FREQ = 2
 
     # Fixed hyperparameters
-    BATCH_SIZE = 32
+    BATCH_SIZE = 8
     EMBEDDING_SIZE = None
-    DROPOUT = 0.5  # High dropout needed for small dataset (~19K samples)
+    DROPOUT = 0.5
     ATTENTION_TYPE = "general"
     LEARNING_RATE = 0.001
-    max_samples = 87_710
+    max_samples = 100_000
 
     param_combinations = [
         (
             MIN_FREQ,
-            128,
+            350,
             2,
-            10,
+            15,
         ),
     ]
 
@@ -1760,7 +1761,7 @@ if __name__ == "__main__":
     all_results = []
     overall_start_time = time.time()
 
-   # ===== STEP 1: LOAD DATASET =====
+    # ===== STEP 1: LOAD DATASET =====
     print(f"[1/8] Loading MediTOD dataset...")
 
     gloss_sequences, text_sequences = load_data_from_file(
@@ -1823,21 +1824,21 @@ if __name__ == "__main__":
             OUTPUT_DIM = len(text_vocab)
 
             config = {
-    "input_dim": INPUT_DIM,
-    "output_dim": OUTPUT_DIM,
-    "embedding_size": embedding_size,
-    "hidden_size": hidden_size,
-    "num_layers": num_layers,
-    "dropout": DROPOUT,
-    "attention_type": ATTENTION_TYPE,
-    "batch_size": BATCH_SIZE,
-    "learning_rate": LEARNING_RATE,
-    "num_epochs": num_epochs,
-    "min_freq": min_freq,
-    "dataset": "MediTOD",
-    "train_samples": len(train_gloss),
-    "val_samples": len(val_gloss),
-}
+                "input_dim": INPUT_DIM,
+                "output_dim": OUTPUT_DIM,
+                "embedding_size": embedding_size,
+                "hidden_size": hidden_size,
+                "num_layers": num_layers,
+                "dropout": DROPOUT,
+                "attention_type": ATTENTION_TYPE,
+                "batch_size": BATCH_SIZE,
+                "learning_rate": LEARNING_RATE,
+                "num_epochs": num_epochs,
+                "min_freq": min_freq,
+                "dataset": "MediTOD",
+                "train_samples": len(train_gloss),
+                "val_samples": len(val_gloss),
+            }
 
             print(f"   Architecture: {num_layers} layers x {hidden_size} hidden units")
             print(f"   Attention type: {config['attention_type']}")
@@ -1914,8 +1915,10 @@ if __name__ == "__main__":
             print(f"\n[7/8] Training with comprehensive logging...")
 
             # Experiment name matching paper architecture
-            experiment_name = f"MediTOD_baseline_l{num_layers}_h{hidden_size}_e{num_epochs}"
-            
+            experiment_name = (
+                f"MediTOD_baseline_l{num_layers}_h{hidden_size}_e{num_epochs}"
+            )
+
             logger, final_results = train_with_logging(
                 model=model,
                 train_dataloader=train_dataloader,
