@@ -700,7 +700,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.CrossEntropyLoss(ignore_index=text_vocab["<PAD>"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", patience=2, factor=0.5, verbose=True
+        optimizer, mode="max", patience=2, factor=0.5
     )
 
     print("Training...")
