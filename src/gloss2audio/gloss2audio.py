@@ -1,13 +1,10 @@
 from ..model_training import load_gloss2text_full_model, gloss2text_translate_sentence
-from ..constants import GLOSS2TEXT_MODEL_SYNTHETIC_QUANTIZED
 from gtts import gTTS
 
 
 class Gloss2Text:
     def __init__(self, device, gloss_vocab=None, text_vocab=None):
-        model, _gloss_vocab, _text_vocab, _ = load_gloss2text_full_model(
-            GLOSS2TEXT_MODEL_SYNTHETIC_QUANTIZED, device
-        )
+        model, _gloss_vocab, _text_vocab, _ = load_gloss2text_full_model()
         self.model = model
         self.gloss_vocab = gloss_vocab if gloss_vocab else _gloss_vocab
         self.text_vocab = text_vocab if text_vocab else _text_vocab
@@ -71,11 +68,14 @@ if __name__ == "__main__":
         "future of professional football in europe vote",
         "the integration of new member states in the cap vote",
         "that concludes the vote .",
+        "I am going to the hospital tomorrow"
     ]
     
-    for i, gloss_text in enumerate(glosses):
-        gloss_sequence = gloss_text.split(" ")
+    for gloss, original_text in list(zip(glosses, text)):
+        gloss_sequence = gloss.split(" ")
 
         gloss2text = Gloss2Text(device)
         text = gloss2text.infer(gloss_sequence)
-        print(f"{" ".join(text)}")
+        print(f"Original text : {original_text}")
+        print(f"Glosses       : {gloss}")
+        print(f"Predicted text: {" ".join(text)}")

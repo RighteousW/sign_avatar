@@ -46,10 +46,10 @@ REPRESENTATIVES_LEFT = OUTPUT_DIR / "gesture_metadata" / "representatives_left.j
 
 # Gesture recognizer model hyperparameters
 DEFAULT_SEQUENCE_LENGTH = 30
-DEFAULT_BATCH_SIZE = 64
+DEFAULT_BATCH_SIZE = 32
 DEFAULT_LEARNING_RATE = 0.0001
 DEFAULT_HIDDEN_SIZE = 256
-DEFAULT_DROPOUT = 0.1
+DEFAULT_DROPOUT = 0.4
 DEFAULT_EPOCHS = 30
 
 # Video Recording settings

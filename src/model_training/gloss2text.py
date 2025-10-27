@@ -242,17 +242,27 @@ def load_data_from_file(filepath, file_format="csv", max_len=50):
     return gloss_seqs, text_seqs
 
 
-def build_vocab(sequences, min_freq=3):
-    """Build vocabulary from sequences, filtering rare words"""
+def build_vocab(sequences, max_vocab_size=3000):
+    """Keep only the most frequent words"""
     counter = Counter(word for seq in sequences for word in seq)
+
     vocab = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2, "<UNK>": 3}
-    for word, count in counter.items():
-        if count >= min_freq:
-            vocab[word] = len(vocab)
+
+    # Keep only top N most frequent words
+    most_common = counter.most_common(max_vocab_size - 4)  # -4 for special tokens
+
+    for word, _ in most_common:
+        vocab[word] = len(vocab)
+
+    print(f"  Total unique words: {len(counter)}")
+    print(f"  Kept top {len(most_common)} words")
+    print(f"  Final vocab size: {len(vocab)}")
+
     return vocab
 
 
 # Utilities for Saving and Loading Models
+
 
 def save_full_model(model, gloss_vocab, text_vocab, config, save_dir):
     """Save complete model package including weights, vocabularies, and config"""
@@ -336,7 +346,10 @@ def save_quantized_model(model, gloss_vocab, text_vocab, config, save_dir):
     return quantized_model
 
 
-def load_full_model(save_dir, device):
+def load_full_model(
+    save_dir="models/trained_models/gloss2text_logs/MediTOD+Supp_b32_h256_e10_20251026_130017",
+    device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+):
     """
     Load complete model package
 
@@ -372,7 +385,9 @@ def load_full_model(save_dir, device):
 
     # Load weights
     state_dict = torch.load(
-        os.path.join(save_dir, "model_weights.pth"), map_location=device
+        os.path.join(save_dir, "model_weights.pth"),
+        map_location=device,
+        weights_only=False,
     )
     model.load_state_dict(state_dict)
 
@@ -392,7 +407,7 @@ def load_checkpoint(filepath, device):
     return checkpoint
 
 
-def translate_sentence(model, sentence, gloss_vocab, text_vocab, device, max_len=50):
+def translate_sentence(model, sentence, gloss_vocab, text_vocab, device, max_len=None):
     """
     Translate a single gloss sequence to text
 
@@ -408,6 +423,7 @@ def translate_sentence(model, sentence, gloss_vocab, text_vocab, device, max_len
         List of text tokens
     """
     model.eval()
+    max_len = int(len(sentence) * 1.5) if not max_len else max_len
 
     # Convert sentence to indices
     gloss_indices = [gloss_vocab.get(g, gloss_vocab["<UNK>"]) for g in sentence]
@@ -586,27 +602,26 @@ if __name__ == "__main__":
     set_seed(42)
 
     # Config
-    PRIMARY_DATA_PATH = "data/dataset/MediTOD/utterances.csv"
-    SUPPLEMENTARY_PATHS = [
-        "data/dataset/high quality english sentences/synthetic_500K.csv",
-        "data/dataset/ASLG-PC12 dataset/synthetic.csv",
-    ]
-    SAMPLES_PER_SUPPLEMENTARY = 10000  # Number of samples to draw from each supplementary dataset
+    PRIMARY_DATA_PATH = "data/dataset/ASLG-PC12 dataset/train.csv"
+    SUPPLEMENTARY_PATHS = []
+    SAMPLES_PER_SUPPLEMENTARY = (
+        10000  # Number of samples to draw from each supplementary dataset
+    )
 
-    EMBED_SIZE = 256
-    HIDDEN_SIZE = 256
-    NUM_LAYERS = 2
-    DROPOUT = 0.5
-    BATCH_SIZE = 8
+    EMBED_SIZE = 300
+    HIDDEN_SIZE = 500
+    NUM_LAYERS = 3
+    DROPOUT = 0.3
+    BATCH_SIZE = 32
     LEARNING_RATE = 0.0005
-    NUM_EPOCHS = 10
-    MIN_FREQ = 4
+    NUM_EPOCHS = 5
+    MIN_FREQ = 20
     MAX_LEN = 50
     EARLY_STOPPING_PATIENCE = 3
 
     # Create timestamped save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"models/trained_models/gloss2text_logs/MediTOD+Supp_b{BATCH_SIZE}_h{HIDDEN_SIZE}_e{NUM_EPOCHS}_{timestamp}"
+    save_dir = f"models/trained_models/gloss2text_logs/ASLG-PC12_{BATCH_SIZE}_h{HIDDEN_SIZE}_e{NUM_EPOCHS}_{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     print(f"Save directory: {save_dir}\n")
 
@@ -614,11 +629,11 @@ if __name__ == "__main__":
     print(f"Using device: {device}\n")
 
     # Load primary data (MediTOD)
-    print("Loading MediTOD dataset...")
-    meditod_gloss, meditod_text = load_data_from_file(
+    print("Loading Primary dataset...")
+    primary_gloss, primary_text = load_data_from_file(
         PRIMARY_DATA_PATH, file_format="csv", max_len=MAX_LEN
     )
-    print(f"  MediTOD: {len(meditod_gloss)} samples")
+    print(f"  Primary: {len(primary_gloss)} samples")
 
     # Load supplementary data
     supplementary_gloss = []
@@ -645,21 +660,27 @@ if __name__ == "__main__":
 
     print(f"\nTotal supplementary: {len(supplementary_gloss)} samples")
 
-    # Split MediTOD for train/val (validation is MediTOD-only)
-    meditod_split = int(0.8 * len(meditod_gloss))
-    meditod_train_gloss = meditod_gloss[:meditod_split]
-    meditod_train_text = meditod_text[:meditod_split]
-    val_gloss = meditod_gloss[meditod_split:]
-    val_text = meditod_text[meditod_split:]
+    # Split Primary for train/val (validation is Primary-only)
+    primary_split = int(0.8 * len(primary_gloss))
+
+    primary_train_gloss = primary_gloss[:primary_split]
+    primary_train_text = primary_text[:primary_split]
+    val_gloss = primary_gloss[primary_split:]
+    val_text = primary_text[primary_split:]
 
     print(f"\nDataset composition:")
-    print(f"  MediTOD training:   {len(meditod_train_gloss)} samples (weighted 2x)")
-    print(f"  MediTOD validation: {len(val_gloss)} samples")
+    print(f"  Primary training:   {len(primary_train_gloss)}")
+    print(f"  Primary validation: {len(val_gloss)} samples")
     print(f"  Supplementary:      {len(supplementary_gloss)} samples")
 
-    # Combine training data (weight MediTOD 2x)
-    train_gloss = meditod_train_gloss * 2 + supplementary_gloss
-    train_text = meditod_train_text * 2 + supplementary_text
+    # Combine training data (increase weight of Primary if supplementary is valid)
+    supplementary_valid = len(supplementary_gloss) > 0
+    if supplementary_valid:
+        train_gloss = primary_train_gloss * 2 + supplementary_gloss # 20% of Primary * 2
+        train_text = primary_train_text * 2 + supplementary_text
+    else:
+        train_gloss = primary_train_gloss
+        train_text = primary_train_text
 
     # Shuffle combined training data
     combined = list(zip(train_gloss, train_text))
@@ -668,12 +689,12 @@ if __name__ == "__main__":
     train_gloss, train_text = list(train_gloss), list(train_text)
 
     print(f"\nFinal training set: {len(train_gloss)} samples")
-    print(f"Final validation set: {len(val_gloss)} samples (MediTOD-only)\n")
+    print(f"Final validation set: {len(val_gloss)} samples (Primary-only)\n")
 
     # Build vocabs
     print("Building vocabularies...")
-    gloss_vocab = build_vocab(train_gloss, min_freq=MIN_FREQ)
-    text_vocab = build_vocab(train_text, min_freq=MIN_FREQ)
+    gloss_vocab = build_vocab(train_gloss, max_vocab_size=20000)
+    text_vocab = build_vocab(train_text, max_vocab_size=40000)
     print(f"Gloss vocab: {len(gloss_vocab)}, Text vocab: {len(text_vocab)}\n")
 
     # Create datasets
@@ -766,9 +787,6 @@ if __name__ == "__main__":
             }
             save_full_model(model, gloss_vocab, text_vocab, config, save_dir)
 
-            # Also save quantized version
-            save_quantized_model(model, gloss_vocab, text_vocab, config, save_dir)
-
             print(f"  → New best BLEU-4! (saved)")
         else:
             patience_counter += 1
@@ -787,6 +805,9 @@ if __name__ == "__main__":
     with open(history_path, "w") as f:
         json.dump(training_history, f, indent=2)
     print(f"\nTraining history saved to: {history_path}")
+
+    # Also save quantized version
+    save_quantized_model(model, gloss_vocab, text_vocab, config, save_dir)
 
     print("=" * 60)
     print(f"\nBest BLEU Scores:")
