@@ -29,7 +29,7 @@ class AudioToGlossConverter:
     """
     Converts audio files to Namibian Sign Language (NSL) glosses.
 
-    FIXED VERSION: Properly handles hyphenated compounds and prepositional phrases.
+    FIXED VERSION: Handles repetitions and improves gloss generation.
     """
 
     def __init__(self, debug=False):
@@ -127,92 +127,67 @@ class AudioToGlossConverter:
         """
         Reconstruct hyphenated compounds that spaCy splits.
         Returns a dict mapping token indices to their compound forms.
-
-        Example: "cancer - related" -> {idx_of_related: "CANCER-RELATED"}
         """
         compounds = {}
         i = 0
 
         while i < len(tokens):
-            # Look for pattern: word + hyphen + word
             if i + 2 < len(tokens):
                 if tokens[i + 1].text == "-" or tokens[i + 1].tag_ == "HYPH":
-                    # Found hyphen, combine tokens using ORIGINAL TEXT (not lemma)
-                    # This preserves "cancer-related" instead of "cancer-relate"
                     parts = [tokens[i].text.upper()]
                     j = i + 2
-
-                    # Add the part after hyphen
                     parts.append(tokens[j].text.upper())
 
-                    # Check for multiple hyphens (e.g., "well-known-fact")
                     while j + 2 < len(tokens) and tokens[j + 1].text == "-":
                         parts.append(tokens[j + 2].text.upper())
                         j += 2
 
-                    # The last token in the compound is the one we'll keep
                     compound = "-".join(parts)
                     compounds[j] = compound
 
-                    # Mark the earlier tokens as used
                     for k in range(i, j):
-                        compounds[k] = None  # Mark as consumed
+                        compounds[k] = None
 
                     i = j + 1
                     continue
-
             i += 1
 
         return compounds
 
     def _get_gloss_token(self, token, compounds_map) -> str:
-        """
-        Convert a single token to its gloss representation.
-        Checks if it's part of a compound first.
-        """
-        # Check if this token is part of a compound
+        """Convert a single token to its gloss representation."""
         if token.i in compounds_map:
             compound = compounds_map[token.i]
-            if compound is None:  # This token was consumed by a compound
+            if compound is None:
                 return None
-            else:  # This is the main token of the compound
+            else:
                 return compound
 
-        # Possessive pronouns stay as-is
         if token.tag_ in ["PRP$", "WP$"]:
             return token.text.upper()
 
-        # Remove possessive 's
         if "'s" in token.text:
             return token.text.replace("'s", "").upper()
 
-        # Preserve plurals for nouns
         if token.pos_ == "NOUN" and token.tag_ in ["NNS", "NNPS"]:
             return token.text.upper()
 
-        # Default: use lemma
         return token.lemma_.upper()
 
     def _is_content_word(self, token) -> bool:
         """Check if token should be included in glosses"""
-        # Keep content words
         if token.pos_ in ["NOUN", "VERB", "ADJ", "ADV", "NUM", "PRON", "PROPN"]:
-            # Skip auxiliary verbs (be, have, do)
             if token.pos_ == "VERB" and token.lemma_ in ["be", "have", "do"]:
                 return False
-            # Skip auxiliary "be" tagged as AUX
             if token.pos_ == "AUX" and token.lemma_ == "be":
                 return False
-            # Skip expletive "it"
             if token.text.lower() == "it" and token.dep_ == "expl":
                 return False
             return True
 
-        # Keep modals
         if token.tag_ == "MD":
             return True
 
-        # Keep important prepositions (only when they're standalone, not part of noun phrases)
         if token.pos_ == "ADP":
             important_preps = {
                 "with",
@@ -243,37 +218,38 @@ class AudioToGlossConverter:
         """
         Get all tokens that are part of a noun phrase.
         Returns list of tokens in correct order, handling compounds.
+
+        FIX: Use set to prevent duplicates.
         """
+        phrase_token_set = set()  # Use set to prevent duplicates
         phrase_tokens = []
 
         # Collect modifiers
         for child in head_token.children:
-            # Possessives (MY, HIS, THEIR)
             if child.dep_ == "poss" and child.i < head_token.i:
-                phrase_tokens.append(child)
+                if child not in phrase_token_set:
+                    phrase_token_set.add(child)
+                    phrase_tokens.append(child)
 
-            # Compounds (like "Sri" in "Sri Lanka")
             elif child.dep_ == "compound" and child.i < head_token.i:
-                phrase_tokens.append(child)
+                if child not in phrase_token_set:
+                    phrase_token_set.add(child)
+                    phrase_tokens.append(child)
 
-            # Adjectives (including compound adjectives like "cancer-related")
             elif child.dep_ == "amod":
-                # Check if this adjective has modifiers (like "cancer" modifying "related")
-                for grandchild in child.children:
-                    if (
-                        grandchild.dep_ in ["npadvmod", "advmod"]
-                        and grandchild.i < child.i
-                    ):
-                        # This will be part of a compound, let _reconstruct_compounds handle it
-                        pass
-                phrase_tokens.append(child)
+                if child not in phrase_token_set:
+                    phrase_token_set.add(child)
+                    phrase_tokens.append(child)
 
-            # Numbers
             elif child.dep_ == "nummod" and child.i < head_token.i:
-                phrase_tokens.append(child)
+                if child not in phrase_token_set:
+                    phrase_token_set.add(child)
+                    phrase_tokens.append(child)
 
         # Add the head noun itself
-        phrase_tokens.append(head_token)
+        if head_token not in phrase_token_set:
+            phrase_token_set.add(head_token)
+            phrase_tokens.append(head_token)
 
         # Sort by position
         phrase_tokens.sort(key=lambda t: t.i)
@@ -284,11 +260,13 @@ class AudioToGlossConverter:
         """
         Convert a sentence to NSL glosses with proper SOV ordering.
 
-        NSL structure: TIME/TOPIC - SUBJECT - OBJECT - MODIFIERS - VERB - NEGATION
+        MAJOR FIX: Track added glosses by TEXT, not just by token object.
+        This prevents "I I I" when the same word appears multiple times.
         """
         glosses = []
         tokens = list(sent)
-        added = set()
+        added_tokens = set()  # Track token objects
+        added_glosses = set()  # Track gloss strings (NEW - prevents duplicates)
 
         # Step 1: Reconstruct compounds
         compounds_map = self._reconstruct_compounds(tokens)
@@ -300,7 +278,25 @@ class AudioToGlossConverter:
                 {k: v for k, v in compounds_map.items() if v is not None},
             )
 
-        # Step 2: Time expressions and discourse markers (go first)
+        # Helper function to add gloss safely
+        def add_gloss_safe(token):
+            """Add gloss only if not already added"""
+            if token in added_tokens:
+                return False
+
+            gloss = self._get_gloss_token(token, compounds_map)
+            if gloss and gloss not in added_glosses:  # Check both token AND gloss text
+                glosses.append(gloss)
+                added_tokens.add(token)
+                added_glosses.add(gloss)  # Track the gloss string
+                return True
+
+            added_tokens.add(
+                token
+            )  # Mark token as processed even if gloss was duplicate
+            return False
+
+        # Step 2: Time expressions and discourse markers
         time_markers = [
             "now",
             "today",
@@ -317,138 +313,94 @@ class AudioToGlossConverter:
 
         for token in tokens:
             if token.text.lower() in time_markers and self._is_content_word(token):
-                if token not in added:
-                    gloss = self._get_gloss_token(token, compounds_map)
-                    if gloss:
-                        glosses.append(gloss)
-                        added.add(token)
+                add_gloss_safe(token)
 
         # Step 3: Identify sentence components
         subjects = []
-        direct_objects = []  # Only true direct objects, not prepositional objects
+        direct_objects = []
         verbs = []
         modals = []
         adverbs = []
 
         for token in tokens:
-            if token in added:
+            if token in added_tokens:
                 continue
 
-            # Subjects
             if token.dep_ in ["nsubj", "nsubjpass"]:
                 subjects.append(token)
-
-            # Direct objects only (NOT prepositional objects)
             elif token.dep_ in ["dobj", "attr"]:
                 direct_objects.append(token)
-
-            # Main verbs (not auxiliaries)
             elif token.pos_ == "VERB" and token.dep_ not in ["aux", "auxpass"]:
                 if token.lemma_ not in ["be", "have", "do"]:
                     verbs.append(token)
-
-            # Modals
             elif token.tag_ == "MD":
                 modals.append(token)
-
-            # Adverbs that modify verbs
             elif token.pos_ == "ADV" and token.dep_ == "advmod":
                 if token.head.pos_ in ["VERB", "AUX"]:
                     adverbs.append(token)
 
         # Step 4: Build glosses in NSL order
 
-        # SUBJECTS (with their modifiers)
+        # SUBJECTS
         for subj in subjects:
             phrase_tokens = self._get_noun_phrase_tokens(subj, compounds_map)
-
             for token in phrase_tokens:
-                if token not in added:
-                    gloss = self._get_gloss_token(token, compounds_map)
-                    if gloss:
-                        glosses.append(gloss)
-                        added.add(token)
+                add_gloss_safe(token)
 
-        # DIRECT OBJECTS (with their modifiers)
+        # DIRECT OBJECTS
         for obj in direct_objects:
             phrase_tokens = self._get_noun_phrase_tokens(obj, compounds_map)
-
             for token in phrase_tokens:
-                if token not in added:
-                    gloss = self._get_gloss_token(token, compounds_map)
-                    if gloss:
-                        glosses.append(gloss)
-                        added.add(token)
+                add_gloss_safe(token)
 
-        # PREPOSITIONAL PHRASES (keep preposition + object together)
-        # These provide context (location, manner, etc.)
+        # PREPOSITIONAL PHRASES
         for token in tokens:
             if token.pos_ == "ADP" and self._is_content_word(token):
-                if token not in added:
-                    # Add the preposition
-                    gloss = self._get_gloss_token(token, compounds_map)
-                    if gloss:
-                        glosses.append(gloss)
-                        added.add(token)
+                if token not in added_tokens:
+                    add_gloss_safe(token)
 
-                    # Add the object of the preposition
+                    # Add object of preposition
                     for child in token.children:
                         if child.dep_ == "pobj":
                             obj_phrase = self._get_noun_phrase_tokens(
                                 child, compounds_map
                             )
                             for obj_token in obj_phrase:
-                                if obj_token not in added:
-                                    obj_gloss = self._get_gloss_token(
-                                        obj_token, compounds_map
-                                    )
-                                    if obj_gloss:
-                                        glosses.append(obj_gloss)
-                                        added.add(obj_token)
+                                add_gloss_safe(obj_token)
 
-        # REMAINING CONTENT WORDS (catch anything we missed)
-        # This ensures we don't lose important nouns, adjectives, etc.
+        # REMAINING CONTENT WORDS
         for token in tokens:
-            if self._is_content_word(token) and token not in added:
-                gloss = self._get_gloss_token(token, compounds_map)
-                if gloss:
-                    glosses.append(gloss)
-                    added.add(token)
+            if self._is_content_word(token):
+                add_gloss_safe(token)
 
-        # MODALS (before verbs in NSL)
+        # MODALS
         for modal in modals:
-            if modal not in added:
-                gloss = self._get_gloss_token(modal, compounds_map)
-                if gloss:
-                    glosses.append(gloss)
-                    added.add(modal)
+            add_gloss_safe(modal)
 
-        # VERBS (main action)
+        # VERBS
         for verb in verbs:
-            if verb not in added:
-                gloss = self._get_gloss_token(verb, compounds_map)
-                if gloss:
-                    glosses.append(gloss)
-                    added.add(verb)
+            add_gloss_safe(verb)
 
-        # VERB ADVERBS (like "sooner")
+        # VERB ADVERBS
         for adv in adverbs:
-            if adv not in added:
-                gloss = self._get_gloss_token(adv, compounds_map)
-                if gloss:
-                    glosses.append(gloss)
-                    added.add(adv)
+            add_gloss_safe(adv)
 
-        # NEGATION (at the end)
+        # NEGATION (special handling - only add once)
+        negation_found = False
         for token in tokens:
-            if token.dep_ == "neg" or (
-                token.text.lower() in ["not", "never"] and token.pos_ == "PART"
+            if not negation_found and (
+                token.dep_ == "neg"
+                or (token.text.lower() in ["not", "never"] and token.pos_ == "PART")
             ):
-                if "NOT" not in glosses and "NEVER" not in glosses:
-                    if token.text.lower() == "never":
+                if token.text.lower() == "never":
+                    if "NEVER" not in added_glosses:
                         glosses.append("NEVER")
-                    else:
+                        added_glosses.add("NEVER")
+                else:
+                    if "NOT" not in added_glosses:
                         glosses.append("NOT")
+                        added_glosses.add("NOT")
+                negation_found = True
                 break
 
         if self.debug:

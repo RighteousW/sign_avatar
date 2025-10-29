@@ -602,33 +602,33 @@ if __name__ == "__main__":
     set_seed(42)
 
     # Config
-    PRIMARY_DATA_PATH = "data/dataset/ASLG-PC12 dataset/train.csv"
+    PRIMARY_DATA_PATH = "data/dataset/synthetic/synthetic_MediTOD.csv"
     SUPPLEMENTARY_PATHS = []
     SAMPLES_PER_SUPPLEMENTARY = (
         10000  # Number of samples to draw from each supplementary dataset
     )
 
     EMBED_SIZE = 300
-    HIDDEN_SIZE = 500
-    NUM_LAYERS = 3
+    HIDDEN_SIZE = 256
+    NUM_LAYERS = 2
     DROPOUT = 0.3
-    BATCH_SIZE = 32
+    BATCH_SIZE = 8
     LEARNING_RATE = 0.0005
     NUM_EPOCHS = 5
-    MIN_FREQ = 20
+    MIN_FREQ = 10
     MAX_LEN = 50
     EARLY_STOPPING_PATIENCE = 3
 
     # Create timestamped save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"models/trained_models/gloss2text_logs/ASLG-PC12_{BATCH_SIZE}_h{HIDDEN_SIZE}_e{NUM_EPOCHS}_{timestamp}"
+    save_dir = f"models/trained_models/gloss2text_logs/synthetic_MediTOD_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     print(f"Save directory: {save_dir}\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}\n")
 
-    # Load primary data (MediTOD)
+    # Load primary data
     print("Loading Primary dataset...")
     primary_gloss, primary_text = load_data_from_file(
         PRIMARY_DATA_PATH, file_format="csv", max_len=MAX_LEN
@@ -656,7 +656,7 @@ if __name__ == "__main__":
             supplementary_text.extend(supp_t)
             print(f"  Loaded: {len(supp_g)} samples")
         except Exception as e:
-            print(f"  ⚠ Warning: Could not load {supp_path}: {e}")
+            print(f"   Warning: Could not load {supp_path}: {e}")
 
     print(f"\nTotal supplementary: {len(supplementary_gloss)} samples")
 
@@ -693,8 +693,8 @@ if __name__ == "__main__":
 
     # Build vocabs
     print("Building vocabularies...")
-    gloss_vocab = build_vocab(train_gloss, max_vocab_size=20000)
-    text_vocab = build_vocab(train_text, max_vocab_size=40000)
+    gloss_vocab = build_vocab(train_gloss, max_vocab_size=15_000)
+    text_vocab = build_vocab(train_text, max_vocab_size=21_000)
     print(f"Gloss vocab: {len(gloss_vocab)}, Text vocab: {len(text_vocab)}\n")
 
     # Create datasets
@@ -732,7 +732,7 @@ if __name__ == "__main__":
     training_history = []
 
     for epoch in range(NUM_EPOCHS):
-        tf_ratio = max(0.3, 1.0 - epoch * 0.05)  # Decay from 1.0 to 0.3
+        tf_ratio = 0.6
 
         train_loss = train_epoch(
             model, train_loader, optimizer, criterion, device, tf_ratio
@@ -782,7 +782,8 @@ if __name__ == "__main__":
                 "best_bleu_3": bleu_scores["BLEU-3"],
                 "best_bleu_4": bleu_scores["BLEU-4"],
                 "best_epoch": epoch + 1,
-                "dataset": "MediTOD + Supplementary (60K)",
+                "primary_dataset": PRIMARY_DATA_PATH,
+                "supplementart_dataset": SUPPLEMENTARY_PATHS,
                 "total_train_samples": len(train_gloss),
             }
             save_full_model(model, gloss_vocab, text_vocab, config, save_dir)
@@ -796,7 +797,7 @@ if __name__ == "__main__":
 
             if patience_counter >= EARLY_STOPPING_PATIENCE:
                 print(
-                    f"\n  ⚠ Early stopping triggered - no improvement for {EARLY_STOPPING_PATIENCE} epochs"
+                    f"\n   Early stopping triggered - no improvement for {EARLY_STOPPING_PATIENCE} epochs"
                 )
                 break
 
@@ -817,34 +818,6 @@ if __name__ == "__main__":
     print(f"  BLEU-4: {config['best_bleu_4']:.4f}")
     print(f"\nModel saved to: {save_dir}/")
     print(f"Quantized model saved to: {save_dir}/quantized/")
-
-    # Test quantized model performance
-    print("\n" + "=" * 60)
-    print("Testing Quantized Model Performance:")
-    print("=" * 60)
-
-    quantized_dir = os.path.join(save_dir, "quantized")
-    quantized_model, _, _, quant_config = load_full_model(quantized_dir, device)
-
-    print("\nEvaluating quantized model on validation set...")
-    quantized_bleu = evaluate(
-        quantized_model, val_loader, gloss_vocab, text_vocab, device
-    )
-
-    print(f"\nOriginal model:")
-    print(
-        f"  BLEU-1: {config['best_bleu_1']:.4f} | BLEU-2: {config['best_bleu_2']:.4f} | "
-        f"BLEU-3: {config['best_bleu_3']:.4f} | BLEU-4: {config['best_bleu_4']:.4f}"
-    )
-    print(f"Quantized model:")
-    print(
-        f"  BLEU-1: {quantized_bleu['BLEU-1']:.4f} | BLEU-2: {quantized_bleu['BLEU-2']:.4f} | "
-        f"BLEU-3: {quantized_bleu['BLEU-3']:.4f} | BLEU-4: {quantized_bleu['BLEU-4']:.4f}"
-    )
-    print(
-        f"BLEU-4 difference: {abs(config['best_bleu_4'] - quantized_bleu['BLEU-4']):.4f} "
-        f"({abs(config['best_bleu_4'] - quantized_bleu['BLEU-4'])/config['best_bleu_4']*100:.2f}%)"
-    )
 
     # Show some example translations
     print("\n" + "=" * 60)

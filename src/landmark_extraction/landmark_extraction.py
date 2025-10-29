@@ -9,7 +9,8 @@ from datetime import datetime
 from tqdm import tqdm
 
 from ..constants import (
-    LANDMARKS_DIR,
+    LANDMARKS_DIR_HANDS_ONLY,
+    LANDMARKS_DIR_HANDS_POSE,
     LANDMARKS_DIR_METADATA_PKL,
     MEDIAPIPE_HAND_LANDMARKER_PATH,
     MEDIAPIPE_POSE_LANDMARKER_PATH,
@@ -71,7 +72,7 @@ class LandmarkExtractor:
         if "pose_landmarks" in self.landmark_types:
             pose_options = vision.PoseLandmarkerOptions(
                 base_options=python.BaseOptions(
-                    model_asset_path=MEDIAPIPE_HAND_LANDMARKER_PATH
+                    model_asset_path=MEDIAPIPE_POSE_LANDMARKER_PATH
                 ),
                 running_mode=vision.RunningMode.VIDEO,
                 num_poses=1,
@@ -454,32 +455,21 @@ def main():
         "--videos_dir", default=VIDEOS_DIR, help="Path to folder containing videos"
     )
     parser.add_argument(
-        "--output_dir", default=LANDMARKS_DIR, help="Path to save landmarks"
-    )
-    parser.add_argument(
-        "--landmark_types",
-        nargs="+",
-        choices=["hand_landmarks", "pose_landmarks"],
-        default=["hand_landmarks"],
+        "--extract_pose",
+        choices=[True, False],
+        default=True,
         help="Types of landmarks to extract",
     )
 
     args = parser.parse_args()
-
-    # Check if required model files exist based on landmark types
-    if "hand_landmarks" in args.landmark_types and not os.path.exists(args.hand_model):
-        print(f"Error: Hand model file not found: {args.hand_model}")
-        return
-
-    if "pose_landmarks" in args.landmark_types and not os.path.exists(args.pose_model):
-        print(f"Error: Pose model file not found: {args.pose_model}")
-        return
-
+    
     print("Initializing MediaPipe models...")
-    extractor = LandmarkExtractor("pose_landmarks" in args.landmark_types)
-
+    extractor = LandmarkExtractor(args.extract_pose)
     print("Starting landmark extraction...")
-    extractor.process_video_folder(args.videos_dir, args.output_dir)
+    
+    output_dir = LANDMARKS_DIR_HANDS_POSE if args.extract_pose else LANDMARKS_DIR_HANDS_ONLY
+    
+    extractor.process_video_folder(args.videos_dir, output_dir)
 
     # Save metadata files
     extractor.save_metadata()

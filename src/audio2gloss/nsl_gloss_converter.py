@@ -1,7 +1,7 @@
 import spacy
 
 
-class NSLGlossConverter:
+class NaiveNSLGlossConverter:
 
     def __init__(self):
         self.nlp = None
@@ -61,7 +61,7 @@ class NSLGlossConverter:
 
 # Test
 if __name__ == "__main__":
-    converter = NSLGlossConverter()
+    converter = NaiveNSLGlossConverter()
 
     if converter.load_model():
         tests = [

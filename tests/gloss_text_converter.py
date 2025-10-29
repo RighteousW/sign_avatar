@@ -6,7 +6,7 @@ import csv
 from collections import Counter
 import math
 
-from src.audio2gloss.nsl_gloss_converter import NSLGlossConverter
+from src.audio2gloss.nsl_gloss_converter import NaiveNSLGlossConverter
 
 
 def calculate_bleu(reference, candidate, n):
@@ -45,7 +45,7 @@ def calculate_bleu(reference, candidate, n):
 
 
 # Load converter
-converter = NSLGlossConverter()
+converter = NaiveNSLGlossConverter()
 converter.load_model()
 
 # Load utterances

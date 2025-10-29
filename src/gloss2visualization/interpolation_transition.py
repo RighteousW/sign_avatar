@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 import random
 
-from ..constants import GESTURE_MODEL_2_SKIP_METADATA_PATH, LANDMARKS_DIR, OUTPUT_DIR, REPRESENTATIVES_LEFT
+from ..constants import GESTURE_MODEL_2_SKIP_METADATA_PATH, LANDMARKS_DIR_HANDS_ONLY, OUTPUT_DIR, REPRESENTATIVES_LEFT
 
 
 class GestureRepresentativeSelector:
@@ -184,7 +184,7 @@ class GestureRepresentativeSelector:
         """Get all gesture files organized by gloss with handedness"""
         gesture_files = defaultdict(list)
 
-        for root, dirs, files in os.walk(LANDMARKS_DIR):
+        for root, dirs, files in os.walk(LANDMARKS_DIR_HANDS_ONLY):
             for file in files:
                 if file.endswith("_landmarks.pkl"):
                     file_path = os.path.join(root, file)

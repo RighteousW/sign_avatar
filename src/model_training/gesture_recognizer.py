@@ -24,7 +24,7 @@ from ..constants import (
     GESTURE_MODEL_DIR,
     GESTURE_MODEL_METADATA_PATH,
     GESTURE_MODEL_PATH,
-    LANDMARKS_DIR,
+    LANDMARKS_DIR_HANDS_ONLY,
 )
 
 
@@ -601,7 +601,7 @@ def main():
     )
     parser.add_argument(
         "--landmarks_dir",
-        default=LANDMARKS_DIR,
+        default=LANDMARKS_DIR_HANDS_ONLY,
         help="Directory containing landmark data",
     )
     parser.add_argument(

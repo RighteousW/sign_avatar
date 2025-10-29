@@ -1,7 +1,7 @@
 import itertools
 import csv
 
-from ..audio2gloss import NSLGlossConverter
+from ..audio2gloss import AudioToGlossConverter
 
 def load_first_n_sentences(filepath, n_lines=100_000):
     """
@@ -36,25 +36,25 @@ def load_text_from_csv(filepath, max_sentences=100_000):
 
 def main():
     # Initialize the converter
-    nsl_converter = NSLGlossConverter()
+    nsl_converter = AudioToGlossConverter()
     nsl_converter.load_model()
+    MAX_DATASET_SIZE = 100_000
 
-    # Configuration 
+    # Configuration
     HQ_ENGLISH_FILE = "data/dataset/high quality english sentences/train.txt"
-    MEDITOD_FILE = "data/dataset/MediTOD/utterances.csv"
-    ASL_CSV_FILE = "data/dataset/ASLG-PC12 dataset/train.csv"
+    # MEDITOD_FILE = "data/dataset/MediTOD/utterances.csv"
+    # ASL_CSV_FILE = "data/dataset/ASLG-PC12 dataset/train.csv"
 
-    text_sequences_1 = load_first_n_sentences(HQ_ENGLISH_FILE, n_lines=500_000)
-    text_sequences_2 = load_text_from_csv(ASL_CSV_FILE)
-    text_sequences_3 = load_text_from_csv(MEDITOD_FILE)
-    combined_sentences = text_sequences_1 + text_sequences_2 + text_sequences_3
-    max_number_of_sentences = len(combined_sentences)
-    OUTPUT_FILE = f"data/dataset/synthetic/synthetic_MediTOD+ASLG-PG12+HQ-ES_{max_number_of_sentences}-max.csv"
+    text_sequences_1 = load_first_n_sentences(HQ_ENGLISH_FILE, n_lines=2_000_000)
+    # text_sequences_2 = load_text_from_csv(ASL_CSV_FILE)
+    # text_sequences_3 = load_text_from_csv(MEDITOD_FILE)
+    combined_sentences = text_sequences_1
+    OUTPUT_FILE = f"data/dataset/synthetic/synthetic_HQ-English-Sentences.csv"
 
     with open(OUTPUT_FILE, "w", newline="", encoding="utf-8") as f:
         csv_writer = csv.writer(f)
         csv_writer.writerow(["gloss", "text"])
-        
+
         valid_count = 0
         conversion_errors = 0
 
@@ -63,15 +63,17 @@ def main():
                 number_of_words = len(original_text.split(" "))
                 if number_of_words > 20 or number_of_words < 3:
                     continue
-                glosses = nsl_converter.text_to_gloss(original_text)
+                glosses = nsl_converter.text_to_glosses(original_text)
 
                 # Skip empty results
                 if not glosses:
                     continue
-                
+
                 # Write valid data
                 csv_writer.writerow([glosses, original_text])
                 valid_count += 1
+                if valid_count >= MAX_DATASET_SIZE:
+                    break
 
             except Exception as e:
                 if conversion_errors < 10:  # Only print first few errors
