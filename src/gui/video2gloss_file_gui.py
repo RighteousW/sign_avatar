@@ -24,10 +24,10 @@ from PyQt6.QtCore import pyqtSignal, QObject
 
 try:
     from ..constants import (
-        GESTURE_MODEL_2_SKIP,
-        GESTURE_MODEL_2_SKIP_METADATA_PATH,
         MEDIAPIPE_HAND_LANDMARKER_PATH,
         MEDIAPIPE_POSE_LANDMARKER_PATH,
+        get_gesture_metadata_path,
+        get_gesture_model_path,
     )
     from ..model_training import GestureRecognizerModel
     from ..video2gloss.inference_example import MediaPipeLandmarkExtractor
@@ -49,7 +49,7 @@ class VideoFileProcessor(QObject):
         self.confidence_threshold = 0.7
 
         # Load model
-        with open(str(GESTURE_MODEL_2_SKIP_METADATA_PATH), "rb") as f:
+        with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.model_info = pickle.load(f)
 
         self.model = GestureRecognizerModel(
@@ -59,7 +59,9 @@ class VideoFileProcessor(QObject):
             dropout=self.model_info["dropout"],
         )
 
-        checkpoint = torch.load(str(GESTURE_MODEL_2_SKIP), map_location=self.device)
+        checkpoint = torch.load(
+            str(get_gesture_model_path(False, 2)), map_location=self.device
+        )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()
@@ -90,24 +92,28 @@ class VideoFileProcessor(QObject):
         thread.daemon = True
         thread.start()
 
+
     def _process_video_file(self, video_path):
         try:
             cap = cv2.VideoCapture(video_path)
+            frame_count = 0
 
             while self.is_processing and cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
 
+                frame_count += 1
+
                 # Process frame using MediaPipeLandmarkExtractor (2_skip pattern)
-                # Returns list of features: empty for skipped frames, or interpolated features
+                # Returns list of features: same as webcam
                 feature_list = self.landmark_extractor.process_frame(frame)
 
                 # Add all returned features to queue (handles interpolation)
                 for features in feature_list:
                     self.feature_queue.append(features)
 
-                    # Run inference when queue is full (for each interpolated frame)
+                    # Run inference when queue is full (for each frame)
                     if len(self.feature_queue) == self.sequence_length:
                         prediction, confidence = self._run_inference()
 
@@ -130,7 +136,7 @@ class VideoFileProcessor(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Video processing error: {str(e)}")
-
+            
     def _run_inference(self):
         """Run model inference on current sequence"""
         if len(self.feature_queue) < self.sequence_length:

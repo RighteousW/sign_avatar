@@ -11,25 +11,24 @@ from collections import deque
 import argparse
 
 from ..constants import (
-    GESTURE_MODEL_2_SKIP,
-    GESTURE_MODEL_2_SKIP_METADATA_PATH,
     MEDIAPIPE_HAND_LANDMARKER_PATH,
     MEDIAPIPE_POSE_LANDMARKER_PATH,
+    get_gesture_metadata_path,
+    get_gesture_model_path,
 )
 
 from ..model_training import GestureRecognizerModel
 
 
 class MediaPipeLandmarkExtractor:
-    """MediaPipe landmark extractor with 2_skip pattern"""
+    """MediaPipe landmark extractor matching training preprocessing"""
 
     def __init__(self, hand_model_path, pose_model_path, feature_info):
         self.feature_info = feature_info
         self.frame_counter = 0
-        self.frame_buffer = []
         self.last_processed_features = None
 
-        # Setup MediaPipe
+        # Setup MediaPipe (same as before)
         hand_options = vision.HandLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=str(hand_model_path)),
             running_mode=vision.RunningMode.VIDEO,
@@ -49,6 +48,7 @@ class MediaPipeLandmarkExtractor:
             min_tracking_confidence=0.5,
         )
         self.pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
+
         self.timestamp_ms = 0
 
     def extract_features_from_frame(self, frame_data: dict) -> np.ndarray:
@@ -78,7 +78,7 @@ class MediaPipeLandmarkExtractor:
             if frame_data.get("pose") and frame_data["pose"]:
                 landmarks = np.array(frame_data["pose"]["landmarks"])
                 if len(landmarks.shape) > 1 and landmarks.shape[1] > 3:
-                    landmarks = landmarks[:, :3]  # Take only x,y,z
+                    landmarks = landmarks[:, :3]
                 landmarks_flat = landmarks.flatten()
                 pose_features[: min(len(landmarks_flat), len(pose_features))] = (
                     landmarks_flat[: len(pose_features)]
@@ -88,9 +88,14 @@ class MediaPipeLandmarkExtractor:
         return np.array(features, dtype=np.float32)
 
     def process_frame(self, frame):
-        """Process frame with 2_skip pattern (process every 3rd frame)"""
+        """
+        Process frame with 2_skip pattern matching webcam behavior.
+        Process every 3rd frame, repeat last features for skipped frames.
+        """
+        frame_index = self.frame_counter
         self.frame_counter += 1
-        should_process = self.frame_counter % 3 == 1
+
+        should_process = frame_index % 3 == 0  # Process frames 0, 3, 6, 9...
 
         if should_process:
             # Process with MediaPipe
@@ -126,26 +131,15 @@ class MediaPipeLandmarkExtractor:
 
             self.timestamp_ms += 1
             current_features = self.extract_features_from_frame(frame_data)
-
-            # Interpolate for buffered frames
-            results = []
-            if self.last_processed_features is not None and len(self.frame_buffer) > 0:
-                num_skipped = len(self.frame_buffer)
-                for i in range(num_skipped):
-                    weight = (i + 1) / (num_skipped + 1)
-                    interpolated = (
-                        1 - weight
-                    ) * self.last_processed_features + weight * current_features
-                    results.append(interpolated)
-
-            results.append(current_features)
             self.last_processed_features = current_features
-            self.frame_buffer = []
+            return [current_features]
 
-            return results
         else:
-            self.frame_buffer.append(frame)
-            return []
+            # Skipped frame - return last processed (or zeros if none)
+            if self.last_processed_features is not None:
+                return [self.last_processed_features.copy()]
+            else:
+                return [np.zeros(self.feature_info["total_features"], dtype=np.float32)]
 
 
 class SimpleInferenceSystem:
@@ -163,7 +157,7 @@ class SimpleInferenceSystem:
         print("Loading 2_skip model...")
 
         # Load model metadata
-        with open(str(GESTURE_MODEL_2_SKIP_METADATA_PATH), "rb") as f:
+        with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.model_info = pickle.load(f)
 
         # Load model
@@ -174,7 +168,9 @@ class SimpleInferenceSystem:
             dropout=self.model_info["dropout"],
         )
 
-        checkpoint = torch.load(str(GESTURE_MODEL_2_SKIP), map_location=self.device)
+        checkpoint = torch.load(
+            str(get_gesture_model_path(False, 2)), map_location=self.device
+        )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()
@@ -347,8 +343,8 @@ def main():
     required_files = [
         str(args.hand_model),
         str(args.pose_model),
-        str(GESTURE_MODEL_2_SKIP),
-        str(GESTURE_MODEL_2_SKIP_METADATA_PATH),
+        str(get_gesture_model_path(False, 2)),
+        str(get_gesture_metadata_path(False, 2)),
     ]
 
     for file_path in required_files:

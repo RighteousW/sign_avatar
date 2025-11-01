@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 import random
 
-from ..constants import GESTURE_MODEL_2_SKIP_METADATA_PATH, LANDMARKS_DIR_HANDS_ONLY, OUTPUT_DIR, REPRESENTATIVES_LEFT
+from ..constants import LANDMARKS_DIR_HANDS_ONLY, OUTPUT_DIR, REPRESENTATIVES_LEFT
 
 
 class GestureRepresentativeSelector:

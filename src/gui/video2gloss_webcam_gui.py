@@ -26,10 +26,9 @@ from PyQt6.QtGui import QImage, QPixmap
 
 try:
     from ..constants import (
-        GESTURE_MODEL_2_SKIP,
-        GESTURE_MODEL_2_SKIP_METADATA_PATH,
         MEDIAPIPE_HAND_LANDMARKER_PATH,
         MEDIAPIPE_POSE_LANDMARKER_PATH,
+        get_gesture_metadata_path, get_gesture_model_path
     )
     from ..model_training import GestureRecognizerModel
     from ..video2gloss.inference_example import MediaPipeLandmarkExtractor
@@ -52,7 +51,7 @@ class WebcamProcessor(QObject):
         self.confidence_threshold = 0.7
 
         # Load model
-        with open(str(GESTURE_MODEL_2_SKIP_METADATA_PATH), "rb") as f:
+        with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.model_info = pickle.load(f)
 
         self.model = GestureRecognizerModel(
@@ -62,7 +61,9 @@ class WebcamProcessor(QObject):
             dropout=self.model_info["dropout"],
         )
 
-        checkpoint = torch.load(str(GESTURE_MODEL_2_SKIP), map_location=self.device)
+        checkpoint = torch.load(
+            str(get_gesture_model_path(False, 2)), map_location=self.device
+        )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()

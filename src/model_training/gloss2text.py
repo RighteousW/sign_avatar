@@ -47,6 +47,8 @@ from datetime import datetime
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from tqdm import tqdm
 
+from ..constants import GLOSS2TEXT_LOGS, GLOSS2TEXT_MODEL_SYNTHETIC
+
 
 # Reproducibility
 def set_seed(seed=42):
@@ -347,7 +349,7 @@ def save_quantized_model(model, gloss_vocab, text_vocab, config, save_dir):
 
 
 def load_full_model(
-    save_dir="models/trained_models/gloss2text_logs/MediTOD+Supp_b32_h256_e10_20251026_130017",
+    save_dir=GLOSS2TEXT_MODEL_SYNTHETIC,
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ):
     """
@@ -586,12 +588,6 @@ def evaluate(model, dataloader, gloss_vocab, text_vocab, device):
     return avg_bleu
 
 
-# API Aliases for backward compatibility
-# Match old naming for backward compatibility
-GRUEncoder = Encoder
-GRUDecoderWithAttention = Decoder
-Seq2SeqWithAttention = Seq2Seq
-
 # Function aliases
 gloss2text_translate_sentence = translate_sentence
 load_gloss2text_full_model = load_full_model
@@ -621,7 +617,7 @@ if __name__ == "__main__":
 
     # Create timestamped save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"models/trained_models/gloss2text_logs/synthetic_MediTOD_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
+    save_dir = f"{str(GLOSS2TEXT_LOGS)}/synthetic_MediTOD_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     print(f"Save directory: {save_dir}\n")
 
