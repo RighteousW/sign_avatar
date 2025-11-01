@@ -18,15 +18,13 @@ class Gloss2Text:
 
 
 class Text2Speech:
-    def __init__(self, text: list[str], audio_path: str = "temp_output.mp3"):
+    def __init__(self, text: str, audio_path: str = "temp_output.mp3"):
         self.text = text
         self.audio_path = audio_path
-
+    
     def synthesize(self):
-        full_text = " ".join(self.text)
-        tts = gTTS(text=full_text, lang="en")
+        tts = gTTS(text=self.text, lang="en")
         tts.save(self.audio_path)
-
 
 class Gloss2Audio:
     def __init__(self, device, gloss_vocab=None, text_vocab=None):
