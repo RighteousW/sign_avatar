@@ -1,5 +1,5 @@
 """
-Audio to Glosses GUI - Simple Version
+Audio to Glosses GUI
 Press SPACE to record, release to convert to glosses
 """
 

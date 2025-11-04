@@ -572,7 +572,7 @@ class GestureTransitionGenerator:
             "frames": combined_frames,
             "landmark_types": gesture_data[0]["data"].get(
                 "landmark_types", ["hand_landmarks"]
-            ),
+            ) if gesture_data else "None",
             "sequence_metadata": {
                 "gloss_sequence": gloss_sequence,
                 "transition_length": transition_length,
