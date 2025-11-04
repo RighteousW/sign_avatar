@@ -8,8 +8,8 @@ from typing import List, Optional, Tuple
 from ..model_training import GestureRecognizerModel
 
 from ..constants import (
-    GESTURE_MODEL_PATH,
-    GESTURE_MODEL_METADATA_PATH,
+    get_gesture_metadata_path,
+    get_gesture_model_path,
 )
 from ..landmark_extraction import LandmarkExtractor
 
@@ -73,9 +73,9 @@ class GestureRecognizer:
 
         # Use default paths if not provided
         if model_path is None:
-            model_path = GESTURE_MODEL_PATH
+            model_path = get_gesture_model_path(False, 2)
         if metadata_path is None:
-            metadata_path = GESTURE_MODEL_METADATA_PATH
+            metadata_path = get_gesture_metadata_path(False, 2)
 
         # Load model metadata
         with open(str(metadata_path), "rb") as f:
@@ -515,8 +515,8 @@ def main():
     args = parser.parse_args()
 
     gesture_recognizer = GestureRecognizer(
-        model_path=GESTURE_MODEL_PATH,
-        metadata_path=GESTURE_MODEL_METADATA_PATH,
+        model_path=get_gesture_model_path(False, 2),
+        metadata_path=get_gesture_metadata_path(False, 2),
     )
 
     if args.mode == "video":
