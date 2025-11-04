@@ -28,8 +28,6 @@ from typing import Tuple, List
 class AudioToGlossConverter:
     """
     Converts audio files to Namibian Sign Language (NSL) glosses.
-
-    FIXED VERSION: Handles repetitions and improves gloss generation.
     """
 
     def __init__(self, debug=False):
@@ -256,27 +254,45 @@ class AudioToGlossConverter:
 
         return phrase_tokens
 
+
     def _sentence_to_glosses(self, sent) -> List[str]:
         """
         Convert a sentence to NSL glosses with proper SOV ordering.
-
-        MAJOR FIX: Track added glosses by TEXT, not just by token object.
-        This prevents "I I I" when the same word appears multiple times.
+        Enhanced debug output showing all processing steps.
         """
         glosses = []
         tokens = list(sent)
-        added_tokens = set()  # Track token objects
-        added_glosses = set()  # Track gloss strings (NEW - prevents duplicates)
+        added_tokens = set()
+        added_glosses = set()
 
         # Step 1: Reconstruct compounds
         compounds_map = self._reconstruct_compounds(tokens)
 
         if self.debug:
-            print(f"\n=== Processing: {sent.text} ===")
-            print(
-                "Compounds found:",
-                {k: v for k, v in compounds_map.items() if v is not None},
-            )
+            print("\n" + "=" * 70)
+            print("ENGLISH SENTENCE")
+            print("=" * 70)
+            print(f"Input: {sent.text}")
+            print()
+
+            print("=" * 70)
+            print("SPACY NLP PROCESSING")
+            print("=" * 70)
+            print(f"{'Token':<15} {'POS':<10} {'Tag':<10} {'Dep':<15} {'Head':<15}")
+            print("-" * 70)
+            for token in tokens:
+                print(
+                    f"{token.text:<15} {token.pos_:<10} {token.tag_:<10} "
+                    f"{token.dep_:<15} {token.head.text:<15}"
+                )
+            print()
+
+            if any(v is not None for v in compounds_map.values()):
+                print("Compounds Reconstructed:")
+                for k, v in compounds_map.items():
+                    if v is not None:
+                        print(f"  Token {k}: {v}")
+                print()
 
         # Helper function to add gloss safely
         def add_gloss_safe(token):
@@ -285,15 +301,13 @@ class AudioToGlossConverter:
                 return False
 
             gloss = self._get_gloss_token(token, compounds_map)
-            if gloss and gloss not in added_glosses:  # Check both token AND gloss text
+            if gloss and gloss not in added_glosses:
                 glosses.append(gloss)
                 added_tokens.add(token)
-                added_glosses.add(gloss)  # Track the gloss string
+                added_glosses.add(gloss)
                 return True
 
-            added_tokens.add(
-                token
-            )  # Mark token as processed even if gloss was duplicate
+            added_tokens.add(token)
             return False
 
         # Step 2: Time expressions and discourse markers
@@ -311,8 +325,10 @@ class AudioToGlossConverter:
             "then",
         ]
 
+        time_expressions = []
         for token in tokens:
             if token.text.lower() in time_markers and self._is_content_word(token):
+                time_expressions.append(token.text)
                 add_gloss_safe(token)
 
         # Step 3: Identify sentence components
@@ -321,6 +337,7 @@ class AudioToGlossConverter:
         verbs = []
         modals = []
         adverbs = []
+        prepositions = []
 
         for token in tokens:
             if token in added_tokens:
@@ -338,60 +355,140 @@ class AudioToGlossConverter:
             elif token.pos_ == "ADV" and token.dep_ == "advmod":
                 if token.head.pos_ in ["VERB", "AUX"]:
                     adverbs.append(token)
+            elif token.pos_ == "ADP" and self._is_content_word(token):
+                prepositions.append(token)
+
+        if self.debug:
+            print("=" * 70)
+            print("COMPONENT IDENTIFICATION")
+            print("=" * 70)
+            if time_expressions:
+                print(f"Time/Discourse: {', '.join(time_expressions)}")
+            if subjects:
+                print(f"Subjects: {', '.join([s.text for s in subjects])}")
+            if direct_objects:
+                print(f"Objects: {', '.join([o.text for o in direct_objects])}")
+            if verbs:
+                print(f"Verbs: {', '.join([v.text for v in verbs])}")
+            if modals:
+                print(f"Modals: {', '.join([m.text for m in modals])}")
+            if adverbs:
+                print(f"Adverbs: {', '.join([a.text for a in adverbs])}")
+            if prepositions:
+                print(f"Prepositions: {', '.join([p.text for p in prepositions])}")
+
+            # Check for negation
+            negation_tokens = [
+                t.text
+                for t in tokens
+                if t.dep_ == "neg"
+                or (t.text.lower() in ["not", "never"] and t.pos_ == "PART")
+            ]
+            if negation_tokens:
+                print(f"Negation: {', '.join(negation_tokens)}")
+            print()
 
         # Step 4: Build glosses in NSL order
+        if self.debug:
+            print("=" * 70)
+            print("SOV REORDERING + FUNCTION WORD REMOVAL")
+            print("=" * 70)
+            step_num = 1
 
         # SUBJECTS
+        if subjects and self.debug:
+            print(f"Step {step_num}: Adding SUBJECTS")
+            step_num += 1
         for subj in subjects:
             phrase_tokens = self._get_noun_phrase_tokens(subj, compounds_map)
+            if self.debug and phrase_tokens:
+                phrase_words = [t.text for t in phrase_tokens]
+                print(f"  Noun phrase: {' '.join(phrase_words)}")
             for token in phrase_tokens:
                 add_gloss_safe(token)
 
         # DIRECT OBJECTS
+        if direct_objects and self.debug:
+            print(f"Step {step_num}: Adding DIRECT OBJECTS")
+            step_num += 1
         for obj in direct_objects:
             phrase_tokens = self._get_noun_phrase_tokens(obj, compounds_map)
+            if self.debug and phrase_tokens:
+                phrase_words = [t.text for t in phrase_tokens]
+                print(f"  Noun phrase: {' '.join(phrase_words)}")
             for token in phrase_tokens:
                 add_gloss_safe(token)
 
         # PREPOSITIONAL PHRASES
+        prep_added = False
         for token in tokens:
             if token.pos_ == "ADP" and self._is_content_word(token):
                 if token not in added_tokens:
+                    if not prep_added and self.debug:
+                        print(f"Step {step_num}: Adding PREPOSITIONAL PHRASES")
+                        step_num += 1
+                        prep_added = True
+
+                    if self.debug:
+                        print(f"  Preposition: {token.text}")
                     add_gloss_safe(token)
 
                     # Add object of preposition
                     for child in token.children:
                         if child.dep_ == "pobj":
-                            obj_phrase = self._get_noun_phrase_tokens(
-                                child, compounds_map
-                            )
+                            obj_phrase = self._get_noun_phrase_tokens(child, compounds_map)
+                            if self.debug and obj_phrase:
+                                phrase_words = [t.text for t in obj_phrase]
+                                print(f"    Object: {' '.join(phrase_words)}")
                             for obj_token in obj_phrase:
                                 add_gloss_safe(obj_token)
 
         # REMAINING CONTENT WORDS
+        remaining = []
         for token in tokens:
-            if self._is_content_word(token):
+            if self._is_content_word(token) and token not in added_tokens:
+                remaining.append(token.text)
                 add_gloss_safe(token)
+        if remaining and self.debug:
+            print(f"Step {step_num}: Adding OTHER CONTENT WORDS")
+            print(f"  Words: {', '.join(remaining)}")
+            step_num += 1
 
         # MODALS
+        if modals and self.debug:
+            print(f"Step {step_num}: Adding MODALS")
+            print(f"  Words: {', '.join([m.text for m in modals])}")
+            step_num += 1
         for modal in modals:
             add_gloss_safe(modal)
 
         # VERBS
+        if verbs and self.debug:
+            print(f"Step {step_num}: Adding VERBS")
+            print(f"  Words: {', '.join([v.text for v in verbs])}")
+            step_num += 1
         for verb in verbs:
             add_gloss_safe(verb)
 
         # VERB ADVERBS
+        if adverbs and self.debug:
+            print(f"Step {step_num}: Adding ADVERBS")
+            print(f"  Words: {', '.join([a.text for a in adverbs])}")
+            step_num += 1
         for adv in adverbs:
             add_gloss_safe(adv)
 
-        # NEGATION (special handling - only add once)
+        # NEGATION
         negation_found = False
         for token in tokens:
             if not negation_found and (
                 token.dep_ == "neg"
                 or (token.text.lower() in ["not", "never"] and token.pos_ == "PART")
             ):
+                if self.debug:
+                    print(f"Step {step_num}: Adding NEGATION")
+                    print(f"  Word: {token.text}")
+
                 if token.text.lower() == "never":
                     if "NEVER" not in added_glosses:
                         glosses.append("NEVER")
@@ -404,7 +501,13 @@ class AudioToGlossConverter:
                 break
 
         if self.debug:
+            print()
+            print("=" * 70)
+            print("NSL GLOSS SEQUENCE")
+            print("=" * 70)
             print(f"Output: {' '.join(glosses)}")
+            print("=" * 70)
+            print()
 
         return glosses
 
@@ -412,41 +515,42 @@ class AudioToGlossConverter:
 # Example usage and testing
 if __name__ == "__main__":
     # Create converter with debug mode disabled by default
-    converter = AudioToGlossConverter(debug=False)
+    converter = AudioToGlossConverter(debug=True)
 
     if converter.load_model():
-        test_sentences = [
-            # Basic sentences
-            "Hospital after an accident",
-            "I am going to the store tomorrow",
-            "The dog is not eating his food",
-            "She quickly ran to the park",
-            # Questions
-            "Where is the cat?",
-            "What did you eat for breakfast?",
-            "When will the meeting start?",
-            # Negations
-            "I don't like vegetables",
-            "She will never forget this moment",
-            "He hasn't finished his homework yet",
-            # Conditionals
-            "If it rains, we will stay home",
-            "When she arrives, we can start dinner",
-            # Multiple clauses
-            "I went to the store and bought some milk",
-            "Because it was cold, I wore my heavy jacket",
-            # Possessives
-            "My brother's car is very fast",
-            "Their teacher gave them a difficult assignment",
-            # Time expressions
-            "Yesterday I visited my grandmother",
-            "Next week we will travel to Paris",
-            "Last night the storm damaged several houses",
-            # Spatial concepts (important for NSL)
-            "The children argue with the teacher",
-            "People are talking to me from all sides",
-            "She gave the book to him",
-        ]
+        # test_sentences = [
+        #     # Basic sentences
+        #     "Hospital after an accident",
+        #     "I am going to the store tomorrow",
+        #     "The dog is not eating his food",
+        #     "She quickly ran to the park",
+        #     # Questions
+        #     "Where is the cat?",
+        #     "What did you eat for breakfast?",
+        #     "When will the meeting start?",
+        #     # Negations
+        #     "I don't like vegetables",
+        #     "She will never forget this moment",
+        #     "He hasn't finished his homework yet",
+        #     # Conditionals
+        #     "If it rains, we will stay home",
+        #     "When she arrives, we can start dinner",
+        #     # Multiple clauses
+        #     "I went to the store and bought some milk",
+        #     "Because it was cold, I wore my heavy jacket",
+        #     # Possessives
+        #     "My brother's car is very fast",
+        #     "Their teacher gave them a difficult assignment",
+        #     # Time expressions
+        #     "Yesterday I visited my grandmother",
+        #     "Next week we will travel to Paris",
+        #     "Last night the storm damaged several houses",
+        #     # Spatial concepts (important for NSL)
+        #     "The children argue with the teacher",
+        #     "People are talking to me from all sides",
+        #     "She gave the book to him",
+        # ]
+        test_sentences = ["I went to the hospital yesterday"]
 
         print("=== Namibian Sign Language (NSL) Gloss Converter ===\n")
 
