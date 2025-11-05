@@ -27,7 +27,7 @@ MEDIAPIPE_POSE_LANDMARKER_PATH = DEPENDENCY_MODELS_DIR / "pose_landmarker_lite.t
 # Special Paths
 GLOSS2TEXT_MODEL_SYNTHETIC = (
     GLOSS2TEXT_LOGS
-    / "synthetic_ASLG-PC12_batch-size8_hidden-size256_epochs5_timestamp20251029_142556"
+    / "synthetic_MediTOD_batch-size8_hidden-size256_epochs5_timestamp20251029_133529"
 )
 GLOSS2TEXT_MODEL_SYNTHETIC_QUANTIZED = GLOSS2TEXT_MODEL_SYNTHETIC / "quantized"
 REPRESENTATIVES_LEFT = OUTPUT_DIR / "gesture_metadata" / "representatives_left.json"

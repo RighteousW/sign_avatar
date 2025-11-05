@@ -32,7 +32,6 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
 
 try:
-    # Import all required modules
     from ..audio2gloss import AudioToGlossConverter
     from ..gloss2visualization import GestureTransitionGenerator
     from ..gloss2audio import Gloss2Text
@@ -49,9 +48,6 @@ try:
 except ImportError as e:
     print(f"Import error: {e}")
     print("Ensure all required modules are available")
-
-
-# ==================== SPEECH TO VISUALIZATION ====================
 
 
 class AudioRecorder(QObject):
@@ -401,9 +397,6 @@ class Speech2VisualizationWidget(QWidget):
         self.update_status_signal.emit(error_msg)
 
 
-# ==================== VIDEO TO AUDIO ====================
-
-
 class VideoProcessor(QObject):
     """Processes video file and detects glosses"""
 
@@ -678,7 +671,7 @@ class Video2AudioWidget(QWidget):
         """Translate glosses to text"""
         try:
             text = self.translator.infer(glosses)
-            text_str = " ".join(text)
+            text_str = " ".join(text).replace("_", " ")
 
             self.update_text_signal.emit(text_str)
             self.update_status_signal.emit("Translation complete - Ready to play audio")
@@ -737,9 +730,6 @@ class Video2AudioWidget(QWidget):
         self.update_status_signal.emit(f"Error: {error_msg}")
         self.select_btn.setEnabled(True)
         self.process_btn.setEnabled(True)
-
-
-# ==================== MAIN WINDOW ====================
 
 
 class IntegratedNSLSystem(QTabWidget):
