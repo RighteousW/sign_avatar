@@ -22,19 +22,337 @@ Language to English and Oshiwambo. 1 Front matter xxi-xxviii.
 import speech_recognition as sr
 import spacy
 import io
-from typing import Tuple, List
+from typing import Tuple, List, Optional, Set
 
 
 class AudioToGlossConverter:
     """
     Converts audio files to Namibian Sign Language (NSL) glosses.
+    CONSTRAINED to only use available gesture recognizer vocabulary.
     """
 
-    def __init__(self, debug=False):
+    def __init__(self, valid_glosses: Optional[List[str]] = None, debug=False):
         self.recognizer = sr.Recognizer()
         self.nlp = None
         self.target_language = "NSL"
         self.debug = debug
+
+        # Define valid vocabulary from gesture recognizer
+        if valid_glosses is None:
+            self.valid_glosses = self._get_default_vocabulary()
+        else:
+            self.valid_glosses = set(g.upper() for g in valid_glosses)
+
+        # Create mapping for word variations to valid glosses
+        self.word_to_gloss_map = self._create_word_mapping()
+
+        if self.debug:
+            print(f"Loaded {len(self.valid_glosses)} valid glosses")
+
+    def _get_default_vocabulary(self) -> Set[str]:
+        """Default vocabulary from your gesture recognizer class names"""
+        return {
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "I",
+            "J",
+            "K",
+            "L",
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z",
+            "ABDOMEN",
+            "ACCIDENT",
+            "AFTER",
+            "AGAIN",
+            "AGO",
+            "ALCOHOL",
+            "ALSO",
+            "ALWAYS",
+            "ANGRY",
+            "ANIMAL",
+            "ARRIVE",
+            "BANANA",
+            "BECOME_DEAF",
+            "BEFORE",
+            "BEGIN",
+            "BIRD",
+            "BLOOD",
+            "BOOK",
+            "BORING",
+            "BORN",
+            "BOSS",
+            "BOX",
+            "BOY",
+            "BREAST_FEED",
+            "BROKEN",
+            "BUT",
+            "CAR",
+            "CHILD",
+            "CHILDREN",
+            "CHURCH",
+            "CLEAN",
+            "CLEVER",
+            "COME",
+            "DIFFICULT",
+            "DOCTOR",
+            "DRINK",
+            "FEVERISH",
+            "FRIEND",
+            "GIRL",
+            "GIVE",
+            "GRANDFATHER",
+            "GRANDMOTHER",
+            "HAVE",
+            "HEALTHY",
+            "HIGH",
+            "I_DISLIKE_YOU",
+            "I_DONT_KNOW",
+            "KIDNEY",
+            "LOW",
+            "MAN",
+            "ME",
+            "MEET",
+            "MOTORBIKE",
+            "OTHERS",
+            "PARENTS",
+            "PERSON_STRADDLES_BRANCH",
+            "PERSON_SWINGS_FROM_BRANCH",
+            "PROTECT",
+            "REMEMBER",
+            "RIDE_BICYCLE",
+            "RUN",
+            "SEE",
+            "SIBLING",
+            "SICK",
+            "SPEAK",
+            "STUPID",
+            "THANK_YOU",
+            "THROW",
+            "TIME",
+            "VIOLENCE",
+            "VOMIT",
+            "WHAT",
+            "WITH",
+            "WOMAN",
+            "YOU_DONT_KNOW_ANYTHING",
+        }
+
+    def _create_word_mapping(self) -> dict:
+        """Create mapping from English words/lemmas to valid glosses"""
+        mapping = {}
+
+        # Direct mappings
+        word_mappings = {
+            # Numbers
+            "zero": "0",
+            "one": "1",
+            "two": "2",
+            "three": "3",
+            "four": "4",
+            "five": "5",
+            "six": "6",
+            "seven": "7",
+            "eight": "8",
+            "nine": "9",
+            # Common words
+            "i": "ME",
+            "me": "ME",
+            "my": "ME",
+            "myself": "ME",
+            "stomach": "ABDOMEN",
+            "belly": "ABDOMEN",
+            "tummy": "ABDOMEN",
+            "crash": "ACCIDENT",
+            "collision": "ACCIDENT",
+            "later": "AFTER",
+            "afterwards": "AFTER",
+            "once more": "AGAIN",
+            "repeat": "AGAIN",
+            "liquor": "ALCOHOL",
+            "beer": "ALCOHOL",
+            "wine": "ALCOHOL",
+            "too": "ALSO",
+            "as well": "ALSO",
+            "forever": "ALWAYS",
+            "constantly": "ALWAYS",
+            "mad": "ANGRY",
+            "furious": "ANGRY",
+            "upset": "ANGRY",
+            "creature": "ANIMAL",
+            "beast": "ANIMAL",
+            "reach": "ARRIVE",
+            "get": "ARRIVE",
+            "come": "ARRIVE",
+            "start": "BEGIN",
+            "commence": "BEGIN",
+            "deaf": "BECOME_DEAF",
+            "deafened": "BECOME_DEAF",
+            "earlier": "BEFORE",
+            "prior": "BEFORE",
+            "kid": "CHILD",
+            "baby": "CHILD",
+            "toddler": "CHILD",
+            "kids": "CHILDREN",
+            "babies": "CHILDREN",
+            "vehicle": "CAR",
+            "automobile": "CAR",
+            "smart": "CLEVER",
+            "intelligent": "CLEVER",
+            "bright": "CLEVER",
+            "hard": "DIFFICULT",
+            "challenging": "DIFFICULT",
+            "tough": "DIFFICULT",
+            "physician": "DOCTOR",
+            "doc": "DOCTOR",
+            "medic": "DOCTOR",
+            "beverage": "DRINK",
+            "sip": "DRINK",
+            "hot": "FEVERISH",
+            "fever": "FEVERISH",
+            "pal": "FRIEND",
+            "buddy": "FRIEND",
+            "mate": "FRIEND",
+            "lady": "GIRL",
+            "lass": "GIRL",
+            "provide": "GIVE",
+            "donate": "GIVE",
+            "offer": "GIVE",
+            "grandpa": "GRANDFATHER",
+            "granddad": "GRANDFATHER",
+            "grandma": "GRANDMOTHER",
+            "granny": "GRANDMOTHER",
+            "nana": "GRANDMOTHER",
+            "possess": "HAVE",
+            "own": "HAVE",
+            "well": "HEALTHY",
+            "fit": "HEALTHY",
+            "fine": "HEALTHY",
+            "tall": "HIGH",
+            "elevated": "HIGH",
+            "short": "LOW",
+            "small": "LOW",
+            "guy": "MAN",
+            "male": "MAN",
+            "gentleman": "MAN",
+            "encounter": "MEET",
+            "greet": "MEET",
+            "motorcycle": "MOTORBIKE",
+            "bike": "MOTORBIKE",
+            "rest": "OTHERS",
+            "remaining": "OTHERS",
+            "mom": "PARENTS",
+            "dad": "PARENTS",
+            "mother": "PARENTS",
+            "father": "PARENTS",
+            "guard": "PROTECT",
+            "defend": "PROTECT",
+            "shield": "PROTECT",
+            "recall": "REMEMBER",
+            "recollect": "REMEMBER",
+            "cycle": "RIDE_BICYCLE",
+            "bike": "RIDE_BICYCLE",
+            "pedal": "RIDE_BICYCLE",
+            "jog": "RUN",
+            "sprint": "RUN",
+            "dash": "RUN",
+            "watch": "SEE",
+            "look": "SEE",
+            "view": "SEE",
+            "observe": "SEE",
+            "brother": "SIBLING",
+            "sister": "SIBLING",
+            "ill": "SICK",
+            "unwell": "SICK",
+            "ailing": "SICK",
+            "talk": "SPEAK",
+            "say": "SPEAK",
+            "tell": "SPEAK",
+            "communicate": "SPEAK",
+            "dumb": "STUPID",
+            "foolish": "STUPID",
+            "idiotic": "STUPID",
+            "thanks": "THANK_YOU",
+            "thankyou": "THANK_YOU",
+            "toss": "THROW",
+            "hurl": "THROW",
+            "fling": "THROW",
+            "period": "TIME",
+            "moment": "TIME",
+            "abuse": "VIOLENCE",
+            "fight": "VIOLENCE",
+            "attack": "VIOLENCE",
+            "puke": "VOMIT",
+            "throw up": "VOMIT",
+            "lady": "WOMAN",
+            "female": "WOMAN",
+            "hate": "I_DISLIKE_YOU",
+            "dislike": "I_DISLIKE_YOU",
+            "dunno": "I_DONT_KNOW",
+            "don't know": "I_DONT_KNOW",
+        }
+
+        # Add all direct mappings
+        for word, gloss in word_mappings.items():
+            mapping[word.lower()] = gloss
+
+        # Add valid glosses mapping to themselves
+        for gloss in self.valid_glosses:
+            mapping[gloss.lower()] = gloss
+
+        return mapping
+
+    def _map_to_valid_gloss(self, word: str) -> Optional[str]:
+        """Map a word to a valid gloss, or return None if no mapping exists"""
+        word_lower = word.lower()
+
+        # Check direct mapping
+        if word_lower in self.word_to_gloss_map:
+            return self.word_to_gloss_map[word_lower]
+
+        # Check if word.upper() is already a valid gloss
+        word_upper = word.upper()
+        if word_upper in self.valid_glosses:
+            return word_upper
+
+        # Try removing common suffixes and check again
+        suffixes = ["s", "ed", "ing", "er", "est", "ly"]
+        for suffix in suffixes:
+            if word_lower.endswith(suffix):
+                stem = word_lower[: -len(suffix)]
+                if stem in self.word_to_gloss_map:
+                    return self.word_to_gloss_map[stem]
+                if stem.upper() in self.valid_glosses:
+                    return stem.upper()
+
+        return None
 
     def load_model(self):
         """Load the spaCy English language model for NLP processing"""
@@ -84,7 +402,7 @@ class AudioToGlossConverter:
         return audio_data
 
     def text_to_glosses(self, text: str) -> List[List[str]]:
-        """Convert text to Namibian Sign Language glosses"""
+        """Convert text to NSL glosses (only valid vocabulary)."""
         if not self.nlp:
             raise RuntimeError("spaCy model not loaded. Call load_model() first.")
 
@@ -92,9 +410,11 @@ class AudioToGlossConverter:
         all_clause_glosses = []
 
         for sent in doc.sents:
-            clause_glosses = self._sentence_to_glosses(sent)
+            clause_glosses, skipped = self._sentence_to_glosses(sent)
             if clause_glosses:
                 all_clause_glosses.append(clause_glosses)
+            if self.debug and skipped:
+                print(f"Skipped words in sentence: {', '.join(skipped)}")
 
         return all_clause_glosses
 
@@ -140,7 +460,7 @@ class AudioToGlossConverter:
                         parts.append(tokens[j + 2].text.upper())
                         j += 2
 
-                    compound = "-".join(parts)
+                    compound = "_".join(parts)  # Use underscore for compounds
                     compounds[j] = compound
 
                     for k in range(i, j):
@@ -152,25 +472,45 @@ class AudioToGlossConverter:
 
         return compounds
 
-    def _get_gloss_token(self, token, compounds_map) -> str:
-        """Convert a single token to its gloss representation."""
+    def _separate_digits(self, text: str) -> List[str]:
+        """Separate digits in a string into individual digit glosses"""
+        digits = []
+        for char in text:
+            if char.isdigit():
+                digits.append(char)
+        return digits
+
+    def _get_gloss_token(self, token, compounds_map) -> Optional[str]:
+        """Convert a single token to its gloss representation (CONSTRAINED)"""
         if token.i in compounds_map:
             compound = compounds_map[token.i]
             if compound is None:
                 return None
-            else:
+            # Check if compound is valid
+            if compound in self.valid_glosses:
                 return compound
+            # Try to map it
+            mapped = self._map_to_valid_gloss(compound)
+            return mapped
 
+        # Check if token is a number that needs separation
+        if token.pos_ == "NUM" and token.text.isdigit() and len(token.text) > 1:
+            # Return special marker for multi-digit numbers
+            return f"__DIGITS__{token.text}"
+
+        # Get base form
         if token.tag_ in ["PRP$", "WP$"]:
-            return token.text.upper()
+            word = token.text
+        elif "'s" in token.text:
+            word = token.text.replace("'s", "")
+        elif token.pos_ == "NOUN" and token.tag_ in ["NNS", "NNPS"]:
+            word = token.text
+        else:
+            word = token.lemma_
 
-        if "'s" in token.text:
-            return token.text.replace("'s", "").upper()
-
-        if token.pos_ == "NOUN" and token.tag_ in ["NNS", "NNPS"]:
-            return token.text.upper()
-
-        return token.lemma_.upper()
+        # Map to valid gloss
+        mapped_gloss = self._map_to_valid_gloss(word)
+        return mapped_gloss
 
     def _is_content_word(self, token) -> bool:
         """Check if token should be included in glosses"""
@@ -187,27 +527,7 @@ class AudioToGlossConverter:
             return True
 
         if token.pos_ == "ADP":
-            important_preps = {
-                "with",
-                "without",
-                "for",
-                "about",
-                "from",
-                "to",
-                "in",
-                "on",
-                "at",
-                "by",
-                "after",
-                "before",
-                "during",
-                "until",
-                "since",
-                "through",
-                "near",
-                "under",
-                "over",
-            }
+            important_preps = {"with", "after", "before"}
             return token.text.lower() in important_preps
 
         return False
@@ -216,10 +536,8 @@ class AudioToGlossConverter:
         """
         Get all tokens that are part of a noun phrase.
         Returns list of tokens in correct order, handling compounds.
-
-        FIX: Use set to prevent duplicates.
         """
-        phrase_token_set = set()  # Use set to prevent duplicates
+        phrase_token_set = set()
         phrase_tokens = []
 
         # Collect modifiers
@@ -254,13 +572,13 @@ class AudioToGlossConverter:
 
         return phrase_tokens
 
-
-    def _sentence_to_glosses(self, sent) -> List[str]:
+    def _sentence_to_glosses(self, sent) -> Tuple[List[str], List[str]]:
         """
         Convert a sentence to NSL glosses with proper SOV ordering.
-        Enhanced debug output showing all processing steps.
+        Returns: (glosses, skipped_words)
         """
         glosses = []
+        skipped_words = []
         tokens = list(sent)
         added_tokens = set()
         added_glosses = set()
@@ -275,60 +593,45 @@ class AudioToGlossConverter:
             print(f"Input: {sent.text}")
             print()
 
-            print("=" * 70)
-            print("SPACY NLP PROCESSING")
-            print("=" * 70)
-            print(f"{'Token':<15} {'POS':<10} {'Tag':<10} {'Dep':<15} {'Head':<15}")
-            print("-" * 70)
-            for token in tokens:
-                print(
-                    f"{token.text:<15} {token.pos_:<10} {token.tag_:<10} "
-                    f"{token.dep_:<15} {token.head.text:<15}"
-                )
-            print()
-
-            if any(v is not None for v in compounds_map.values()):
-                print("Compounds Reconstructed:")
-                for k, v in compounds_map.items():
-                    if v is not None:
-                        print(f"  Token {k}: {v}")
-                print()
-
         # Helper function to add gloss safely
         def add_gloss_safe(token):
-            """Add gloss only if not already added"""
+            """Add gloss only if not already added AND it's in valid vocabulary"""
             if token in added_tokens:
                 return False
 
             gloss = self._get_gloss_token(token, compounds_map)
-            if gloss and gloss not in added_glosses:
+
+            # Handle multi-digit numbers
+            if gloss and gloss.startswith("__DIGITS__"):
+                digit_string = gloss.replace("__DIGITS__", "")
+                for digit in digit_string:
+                    if digit in self.valid_glosses and digit not in added_glosses:
+                        glosses.append(digit)
+                        added_glosses.add(digit)
+                        if self.debug:
+                            print(f"  ✓ Added digit: {digit}")
+                added_tokens.add(token)
+                return True
+
+            if gloss and gloss in self.valid_glosses and gloss not in added_glosses:
                 glosses.append(gloss)
                 added_tokens.add(token)
                 added_glosses.add(gloss)
+                if self.debug:
+                    print(f"  ✓ Added: {token.text} -> {gloss}")
                 return True
+            elif gloss is None and self._is_content_word(token):
+                skipped_words.append(token.text)
+                if self.debug:
+                    print(f"  ✗ Skipped: {token.text} (no valid mapping)")
 
             added_tokens.add(token)
             return False
 
-        # Step 2: Time expressions and discourse markers
-        time_markers = [
-            "now",
-            "today",
-            "yesterday",
-            "tomorrow",
-            "soon",
-            "later",
-            "however",
-            "therefore",
-            "thus",
-            "meanwhile",
-            "then",
-        ]
-
-        time_expressions = []
+        # Step 2: Time expressions
+        time_markers = ["after", "before", "again", "ago", "always"]
         for token in tokens:
             if token.text.lower() in time_markers and self._is_content_word(token):
-                time_expressions.append(token.text)
                 add_gloss_safe(token)
 
         # Step 3: Identify sentence components
@@ -336,8 +639,6 @@ class AudioToGlossConverter:
         direct_objects = []
         verbs = []
         modals = []
-        adverbs = []
-        prepositions = []
 
         for token in tokens:
             if token in added_tokens:
@@ -352,164 +653,59 @@ class AudioToGlossConverter:
                     verbs.append(token)
             elif token.tag_ == "MD":
                 modals.append(token)
-            elif token.pos_ == "ADV" and token.dep_ == "advmod":
-                if token.head.pos_ in ["VERB", "AUX"]:
-                    adverbs.append(token)
-            elif token.pos_ == "ADP" and self._is_content_word(token):
-                prepositions.append(token)
 
         if self.debug:
+            print("\n" + "=" * 70)
+            print("SOV REORDERING (Vocabulary Constrained)")
             print("=" * 70)
-            print("COMPONENT IDENTIFICATION")
-            print("=" * 70)
-            if time_expressions:
-                print(f"Time/Discourse: {', '.join(time_expressions)}")
-            if subjects:
-                print(f"Subjects: {', '.join([s.text for s in subjects])}")
-            if direct_objects:
-                print(f"Objects: {', '.join([o.text for o in direct_objects])}")
-            if verbs:
-                print(f"Verbs: {', '.join([v.text for v in verbs])}")
-            if modals:
-                print(f"Modals: {', '.join([m.text for m in modals])}")
-            if adverbs:
-                print(f"Adverbs: {', '.join([a.text for a in adverbs])}")
-            if prepositions:
-                print(f"Prepositions: {', '.join([p.text for p in prepositions])}")
-
-            # Check for negation
-            negation_tokens = [
-                t.text
-                for t in tokens
-                if t.dep_ == "neg"
-                or (t.text.lower() in ["not", "never"] and t.pos_ == "PART")
-            ]
-            if negation_tokens:
-                print(f"Negation: {', '.join(negation_tokens)}")
-            print()
-
-        # Step 4: Build glosses in NSL order
-        if self.debug:
-            print("=" * 70)
-            print("SOV REORDERING + FUNCTION WORD REMOVAL")
-            print("=" * 70)
-            step_num = 1
 
         # SUBJECTS
-        if subjects and self.debug:
-            print(f"Step {step_num}: Adding SUBJECTS")
-            step_num += 1
         for subj in subjects:
             phrase_tokens = self._get_noun_phrase_tokens(subj, compounds_map)
-            if self.debug and phrase_tokens:
-                phrase_words = [t.text for t in phrase_tokens]
-                print(f"  Noun phrase: {' '.join(phrase_words)}")
             for token in phrase_tokens:
                 add_gloss_safe(token)
 
         # DIRECT OBJECTS
-        if direct_objects and self.debug:
-            print(f"Step {step_num}: Adding DIRECT OBJECTS")
-            step_num += 1
         for obj in direct_objects:
             phrase_tokens = self._get_noun_phrase_tokens(obj, compounds_map)
-            if self.debug and phrase_tokens:
-                phrase_words = [t.text for t in phrase_tokens]
-                print(f"  Noun phrase: {' '.join(phrase_words)}")
             for token in phrase_tokens:
                 add_gloss_safe(token)
 
         # PREPOSITIONAL PHRASES
-        prep_added = False
         for token in tokens:
             if token.pos_ == "ADP" and self._is_content_word(token):
                 if token not in added_tokens:
-                    if not prep_added and self.debug:
-                        print(f"Step {step_num}: Adding PREPOSITIONAL PHRASES")
-                        step_num += 1
-                        prep_added = True
-
-                    if self.debug:
-                        print(f"  Preposition: {token.text}")
                     add_gloss_safe(token)
-
                     # Add object of preposition
                     for child in token.children:
                         if child.dep_ == "pobj":
-                            obj_phrase = self._get_noun_phrase_tokens(child, compounds_map)
-                            if self.debug and obj_phrase:
-                                phrase_words = [t.text for t in obj_phrase]
-                                print(f"    Object: {' '.join(phrase_words)}")
+                            obj_phrase = self._get_noun_phrase_tokens(
+                                child, compounds_map
+                            )
                             for obj_token in obj_phrase:
                                 add_gloss_safe(obj_token)
 
         # REMAINING CONTENT WORDS
-        remaining = []
         for token in tokens:
             if self._is_content_word(token) and token not in added_tokens:
-                remaining.append(token.text)
                 add_gloss_safe(token)
-        if remaining and self.debug:
-            print(f"Step {step_num}: Adding OTHER CONTENT WORDS")
-            print(f"  Words: {', '.join(remaining)}")
-            step_num += 1
-
-        # MODALS
-        if modals and self.debug:
-            print(f"Step {step_num}: Adding MODALS")
-            print(f"  Words: {', '.join([m.text for m in modals])}")
-            step_num += 1
-        for modal in modals:
-            add_gloss_safe(modal)
 
         # VERBS
-        if verbs and self.debug:
-            print(f"Step {step_num}: Adding VERBS")
-            print(f"  Words: {', '.join([v.text for v in verbs])}")
-            step_num += 1
         for verb in verbs:
             add_gloss_safe(verb)
-
-        # VERB ADVERBS
-        if adverbs and self.debug:
-            print(f"Step {step_num}: Adding ADVERBS")
-            print(f"  Words: {', '.join([a.text for a in adverbs])}")
-            step_num += 1
-        for adv in adverbs:
-            add_gloss_safe(adv)
-
-        # NEGATION
-        negation_found = False
-        for token in tokens:
-            if not negation_found and (
-                token.dep_ == "neg"
-                or (token.text.lower() in ["not", "never"] and token.pos_ == "PART")
-            ):
-                if self.debug:
-                    print(f"Step {step_num}: Adding NEGATION")
-                    print(f"  Word: {token.text}")
-
-                if token.text.lower() == "never":
-                    if "NEVER" not in added_glosses:
-                        glosses.append("NEVER")
-                        added_glosses.add("NEVER")
-                else:
-                    if "NOT" not in added_glosses:
-                        glosses.append("NOT")
-                        added_glosses.add("NOT")
-                negation_found = True
-                break
 
         if self.debug:
             print()
             print("=" * 70)
-            print("NSL GLOSS SEQUENCE")
+            print("NSL GLOSS SEQUENCE (Valid Vocabulary Only)")
             print("=" * 70)
             print(f"Output: {' '.join(glosses)}")
+            if skipped_words:
+                print(f"Skipped: {', '.join(skipped_words)}")
             print("=" * 70)
             print()
 
-        return glosses
+        return glosses, skipped_words
 
 
 # Example usage and testing

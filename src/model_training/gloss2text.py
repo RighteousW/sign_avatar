@@ -599,7 +599,9 @@ if __name__ == "__main__":
 
     # Config
     PRIMARY_DATA_PATH = "data/dataset/synthetic/synthetic_MediTOD.csv"
-    SUPPLEMENTARY_PATHS = []
+    SUPPLEMENTARY_PATHS = [
+        "data/dataset/synthetic/synthetic_NSL_gesture_vocab.csv",
+    ]
     SAMPLES_PER_SUPPLEMENTARY = (
         10000  # Number of samples to draw from each supplementary dataset
     )
@@ -608,7 +610,7 @@ if __name__ == "__main__":
     HIDDEN_SIZE = 256
     NUM_LAYERS = 2
     DROPOUT = 0.3
-    BATCH_SIZE = 8
+    BATCH_SIZE = 32
     LEARNING_RATE = 0.0005
     NUM_EPOCHS = 5
     MIN_FREQ = 10
@@ -617,7 +619,7 @@ if __name__ == "__main__":
 
     # Create timestamped save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"{str(GLOSS2TEXT_LOGS)}/synthetic_MediTOD_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
+    save_dir = f"{str(GLOSS2TEXT_LOGS)}/synthetic_MediTOD+gesture_vocab_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     print(f"Save directory: {save_dir}\n")
 

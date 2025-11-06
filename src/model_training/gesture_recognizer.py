@@ -536,7 +536,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Train sign language recognition models"
     )
-    parser.add_argument("--use_pose", default=True, help="Use pose landmarks")
+    parser.add_argument("--use_pose", default=False, help="Use pose landmarks")
     parser.add_argument("--sequence_length", type=int, default=DEFAULT_SEQUENCE_LENGTH)
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)

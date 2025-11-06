@@ -9,6 +9,7 @@ import pickle
 import torch
 import cv2
 import time
+import numpy as np
 from collections import deque
 from PyQt6.QtWidgets import (
     QApplication,
@@ -28,10 +29,11 @@ try:
     from ..constants import (
         MEDIAPIPE_HAND_LANDMARKER_PATH,
         MEDIAPIPE_POSE_LANDMARKER_PATH,
-        get_gesture_metadata_path, get_gesture_model_path
+        get_gesture_metadata_path,
+        get_gesture_model_path,
     )
     from ..model_training import GestureRecognizerModel
-    from ..video2gloss.inference_example import MediaPipeLandmarkExtractor
+    from ..landmark_extraction import LandmarkExtractor
 except ImportError:
     print("Import error: Ensure required modules are available")
 
@@ -68,12 +70,11 @@ class WebcamProcessor(QObject):
         self.model.to(self.device)
         self.model.eval()
 
-        # Initialize landmark extractor
-        self.landmark_extractor = MediaPipeLandmarkExtractor(
-            MEDIAPIPE_HAND_LANDMARKER_PATH,
-            MEDIAPIPE_POSE_LANDMARKER_PATH,
-            self.model_info["feature_info"],
-        )
+        # Initialize landmark extractor (use_pose=True for hands+pose)
+        self.landmark_extractor = LandmarkExtractor(use_pose=True)
+
+        # Store feature info from model
+        self.feature_info = self.model_info["feature_info"]
 
         self.sequence_length = self.model_info["sequence_length"]
         self.feature_queue = deque(maxlen=self.sequence_length)
@@ -81,14 +82,77 @@ class WebcamProcessor(QObject):
         self.last_prediction = ""
         self.current_confidence = 0.0
 
+        # Frame processing state for 2_skip pattern
+        self.frame_counter = 0
+        self.last_processed_features = None
+
+    def extract_features_from_frame_data(self, frame_data: dict) -> np.ndarray:
+        """Extract features using same logic as training script"""
+        features = []
+
+        # Hand landmarks
+        if self.feature_info["hand_landmarks"] > 0:
+            max_hands = self.feature_info["max_hands"]
+            hand_dim_per_hand = self.feature_info["hand_landmarks_per_hand"]
+            hand_features = np.zeros(self.feature_info["hand_landmarks"])
+
+            if frame_data.get("hands"):
+                for i, hand_data in enumerate(frame_data["hands"][:max_hands]):
+                    if hand_data and "landmarks" in hand_data:
+                        landmarks = np.array(hand_data["landmarks"][:21])[
+                            :, :3
+                        ].flatten()
+                        start_idx = i * hand_dim_per_hand
+                        end_idx = start_idx + len(landmarks)
+                        hand_features[start_idx:end_idx] = landmarks
+            features.extend(hand_features)
+
+        # Pose landmarks
+        if self.feature_info["pose_landmarks"] > 0:
+            pose_features = np.zeros(self.feature_info["pose_landmarks"])
+            if frame_data.get("pose") and frame_data["pose"]:
+                landmarks = np.array(frame_data["pose"]["landmarks"])
+                if len(landmarks.shape) > 1 and landmarks.shape[1] > 3:
+                    landmarks = landmarks[:, :3]
+                landmarks_flat = landmarks.flatten()
+                pose_features[: min(len(landmarks_flat), len(pose_features))] = (
+                    landmarks_flat[: len(pose_features)]
+                )
+            features.extend(pose_features)
+
+        return np.array(features, dtype=np.float32)
+
+    def process_frame_with_skip(self, frame):
+        """
+        Process frame with 2_skip pattern matching webcam behavior.
+        Process every 3rd frame, repeat last features for skipped frames.
+        Returns list of features (same as webcam inference).
+        """
+        frame_index = self.frame_counter
+        self.frame_counter += 1
+
+        should_process = frame_index % 3 == 0  # Process frames 0, 3, 6, 9...
+
+        if should_process:
+            # Process with LandmarkExtractor
+            frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
+            current_features = self.extract_features_from_frame_data(frame_data)
+            self.last_processed_features = current_features
+            return [current_features]
+        else:
+            # Skipped frame - return last processed (or zeros if none)
+            if self.last_processed_features is not None:
+                return [self.last_processed_features.copy()]
+            else:
+                return [np.zeros(self.feature_info["total_features"], dtype=np.float32)]
+
     def start_webcam(self):
         """Start webcam processing"""
         self.is_processing = True
         self.detected_glosses = []
         self.feature_queue.clear()
-        self.landmark_extractor.frame_counter = 0
-        self.landmark_extractor.frame_buffer = []
-        self.landmark_extractor.last_processed_features = None
+        self.frame_counter = 0
+        self.last_processed_features = None
         self.last_prediction = ""
 
         thread = threading.Thread(target=self._process_webcam)
@@ -111,8 +175,8 @@ class WebcamProcessor(QObject):
                 if not ret:
                     break
 
-                # Process frame using MediaPipeLandmarkExtractor (2_skip pattern)
-                feature_list = self.landmark_extractor.process_frame(frame)
+                # Process frame using 2_skip pattern
+                feature_list = self.process_frame_with_skip(frame)
 
                 # Add all returned features to queue
                 for features in feature_list:
@@ -209,8 +273,6 @@ class WebcamProcessor(QObject):
 
     def _pad_or_truncate_sequence(self, sequence, target_length, feature_size):
         """Same padding logic as training script"""
-        import numpy as np
-
         if len(sequence) > target_length:
             indices = np.linspace(0, len(sequence) - 1, target_length, dtype=int)
             return np.array([sequence[i] for i in indices])

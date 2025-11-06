@@ -30,7 +30,7 @@ try:
         REPRESENTATIVES_LEFT,
     )
     from ..model_training import GestureRecognizerModel
-    from ..video2gloss.inference_example import MediaPipeLandmarkExtractor
+    from ..landmark_extraction import LandmarkExtractor
     from ..gloss2audio import Gloss2Text
     from ..audio2gloss import AudioToGlossConverter
     from ..gloss2visualization import GestureTransitionGenerator
@@ -79,11 +79,10 @@ class EndToEndMeasurement:
         self.gesture_model.to(self.device)
         self.gesture_model.eval()
 
-        self.landmark_extractor = MediaPipeLandmarkExtractor(
-            MEDIAPIPE_HAND_LANDMARKER_PATH,
-            MEDIAPIPE_POSE_LANDMARKER_PATH,
-            self.gesture_model_info["feature_info"],
-        )
+        self.landmark_extractor = LandmarkExtractor(use_pose=True)
+        self.feature_info = self.gesture_model_info["feature_info"]
+        self.frame_counter = 0
+        self.last_processed_features = None
 
         # 2. Gloss → Text (Translation)
         print("  Loading translation model...")
@@ -100,6 +99,58 @@ class EndToEndMeasurement:
         self.avatar_generator = GestureTransitionGenerator(REPRESENTATIVES_LEFT)
 
         print("✓ All components loaded\n")
+
+    def extract_features_from_frame_data(self, frame_data: dict) -> np.ndarray:
+        """Extract features using same logic as training script"""
+        features = []
+
+        # Hand landmarks
+        if self.feature_info["hand_landmarks"] > 0:
+            max_hands = self.feature_info["max_hands"]
+            hand_dim_per_hand = self.feature_info["hand_landmarks_per_hand"]
+            hand_features = np.zeros(self.feature_info["hand_landmarks"])
+
+            if frame_data.get("hands"):
+                for i, hand_data in enumerate(frame_data["hands"][:max_hands]):
+                    if hand_data and "landmarks" in hand_data:
+                        landmarks = np.array(hand_data["landmarks"][:21])[:, :3].flatten()
+                        start_idx = i * hand_dim_per_hand
+                        end_idx = start_idx + len(landmarks)
+                        hand_features[start_idx:end_idx] = landmarks
+            features.extend(hand_features)
+
+        # Pose landmarks
+        if self.feature_info["pose_landmarks"] > 0:
+            pose_features = np.zeros(self.feature_info["pose_landmarks"])
+            if frame_data.get("pose") and frame_data["pose"]:
+                landmarks = np.array(frame_data["pose"]["landmarks"])
+                if len(landmarks.shape) > 1 and landmarks.shape[1] > 3:
+                    landmarks = landmarks[:, :3]
+                landmarks_flat = landmarks.flatten()
+                pose_features[: min(len(landmarks_flat), len(pose_features))] = (
+                    landmarks_flat[: len(pose_features)]
+                )
+            features.extend(pose_features)
+
+        return np.array(features, dtype=np.float32)
+
+    def process_frame_with_skip(self, frame):
+        """Process frame with 2_skip pattern"""
+        frame_index = self.frame_counter
+        self.frame_counter += 1
+
+        should_process = frame_index % 3 == 0
+
+        if should_process:
+            frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
+            current_features = self.extract_features_from_frame_data(frame_data)
+            self.last_processed_features = current_features
+            return [current_features]
+        else:
+            if self.last_processed_features is not None:
+                return [self.last_processed_features.copy()]
+            else:
+                return [np.zeros(self.feature_info["total_features"], dtype=np.float32)]
 
     def measure_video_to_speech(self, video_path, ground_truth_glosses=None):
         """
@@ -247,8 +298,8 @@ class EndToEndMeasurement:
         confidence_threshold = 0.7
 
         # Reset landmark extractor state
-        self.landmark_extractor.frame_counter = 0
-        self.landmark_extractor.last_processed_features = None
+        self.frame_counter = 0
+        self.last_processed_features = None
 
         cap = cv2.VideoCapture(str(video_path))
 
@@ -258,7 +309,7 @@ class EndToEndMeasurement:
                 break
 
             # Process frame (2-skip pattern)
-            feature_list = self.landmark_extractor.process_frame(frame)
+            feature_list = self.process_frame_with_skip(frame)
 
             for features in feature_list:
                 feature_queue.append(features)

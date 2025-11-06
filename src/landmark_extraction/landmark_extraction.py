@@ -11,7 +11,8 @@ from tqdm import tqdm
 from ..constants import (
     LANDMARKS_DIR_HANDS_ONLY,
     LANDMARKS_DIR_HANDS_POSE,
-    LANDMARKS_DIR_METADATA_PKL,
+    LANDMARKS_DIR_HANDS_ONLY_METADATA_PKL,
+    LANDMARKS_DIR_HANDS_POSE_METADATA_PKL,
     MEDIAPIPE_HAND_LANDMARKER_PATH,
     MEDIAPIPE_POSE_LANDMARKER_PATH,
     VIDEOS_DIR,
@@ -24,8 +25,11 @@ class LandmarkExtractor:
         Initialize the landmark extractor with MediaPipe models
         """
         self.landmark_types = ["hand_landmarks"]
+        self.metadata_filename = LANDMARKS_DIR_HANDS_ONLY_METADATA_PKL
         if use_pose:
             self.landmark_types.append("pose_landmarks")
+            self.metadata_filename = LANDMARKS_DIR_HANDS_POSE_METADATA_PKL
+            
 
         self.global_timestamp = 0
         self.processing_metadata = {
@@ -89,6 +93,43 @@ class LandmarkExtractor:
         # Store feature info in metadata
         self.processing_metadata["feature_info"] = self.get_feature_dimensions()
 
+    def preprocess_frame_data(self, frame_data):
+        """
+        Preprocess landmarks: replace wrist positions and filter pose landmarks
+        """
+        # Replace pose landmark 15 with left hand landmark 0, and 16 with right hand landmark 0
+        if (
+            "hands" in frame_data
+            and "pose" in frame_data
+            and frame_data["pose"] is not None
+        ):
+            landmarks = frame_data["pose"]["landmarks"]
+
+            left_hand = next(
+                (h for h in frame_data["hands"] if h["handedness"] == "Left"), None
+            )
+            right_hand = next(
+                (h for h in frame_data["hands"] if h["handedness"] == "Right"), None
+            )
+
+            if left_hand and len(landmarks) > 15:
+                # Replace landmark 15 with left hand wrist (landmark 0)
+                landmarks[15] = left_hand["landmarks"][0] + [landmarks[15][3]]
+
+            if right_hand and len(landmarks) > 16:
+                # Replace landmark 16 with right hand wrist (landmark 0)
+                landmarks[16] = right_hand["landmarks"][0] + [landmarks[16][3]]
+
+        # Remove pose landmarks at indices [17,18,19,20,21,22] AFTER replacement
+        if "pose" in frame_data and frame_data["pose"] is not None:
+            landmarks = frame_data["pose"]["landmarks"]
+            filtered_landmarks = [
+                lm for i, lm in enumerate(landmarks) if i not in [17, 18, 19, 20, 21, 22]
+            ]
+            frame_data["pose"]["landmarks"] = filtered_landmarks
+
+        return frame_data
+    
     def get_feature_dimensions(self):
         """
         Calculate and return the feature dimensions for model building
@@ -97,7 +138,7 @@ class LandmarkExtractor:
             21 * 3 * 2 if "hand_landmarks" in self.landmark_types else 0
         )  # 126
         pose_landmarks_dim = (
-            33 * 4 if "pose_landmarks" in self.landmark_types else 0
+            27 * 4 if "pose_landmarks" in self.landmark_types else 0
         )  # 132
 
         total_dim = hand_landmarks_dim + pose_landmarks_dim
@@ -108,7 +149,7 @@ class LandmarkExtractor:
             "total_features": total_dim,
             "max_hands": 2,
             "hand_landmarks_per_hand": 21 * 3,  # 63
-            "pose_total_landmarks": 33,
+            "pose_total_landmarks": 27,
             "pose_coords_per_landmark": 4,  # x, y, z, visibility
         }
 
@@ -189,8 +230,9 @@ class LandmarkExtractor:
                             )
                         frame_data["pose"] = {"landmarks": landmarks}
                 except Exception as e:
-                    pass  # Silently continue on frame errors
+                    pass
 
+            frame_data = self.preprocess_frame_data(frame_data)
             landmarks_data["frames"].append(frame_data)
             frame_count += 1
 
@@ -263,7 +305,7 @@ class LandmarkExtractor:
                     frame_data["pose"] = {"landmarks": landmarks}
             except Exception as e:
                 pass
-
+        frame_data = self.preprocess_frame_data(frame_data)
         return frame_data
 
     def extract_landmarks_from_image(self, image):
@@ -315,6 +357,7 @@ class LandmarkExtractor:
             except Exception as e:
                 pass
 
+        frame_data = self.preprocess_frame_data(frame_data)
         return frame_data
 
     def process_video_folder(self, videos_path, landmarks_path):
@@ -431,10 +474,10 @@ class LandmarkExtractor:
         )
 
         # Save as pickle
-        with open(LANDMARKS_DIR_METADATA_PKL, "wb") as f:
+        with open(self.metadata_filename, "wb") as f:
             pickle.dump(self.processing_metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-        print(f"Saved metadata to: {LANDMARKS_DIR_METADATA_PKL}")
+        print(f"Saved metadata to: {self.metadata_filename}")
 
 
 def main():

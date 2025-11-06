@@ -53,7 +53,6 @@ def extract_landmarks_from_frame_data(
         pose = frame_data.get("pose")
         if pose:
             landmarks = pose.get("landmarks", [])
-            # Extract only x, y, z (skip visibility for consistency with model)
             landmarks_xyz = [[lm[0], lm[1], lm[2]] for lm in landmarks]
             landmarks_flat = np.array(landmarks_xyz).flatten()
             pose_features[: min(len(landmarks_flat), len(pose_features))] = (

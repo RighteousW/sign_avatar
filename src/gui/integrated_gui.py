@@ -36,14 +36,12 @@ try:
     from ..gloss2visualization import GestureTransitionGenerator
     from ..gloss2audio import Gloss2Text
     from ..constants import (
-        REPRESENTATIVES_LEFT,
-        MEDIAPIPE_HAND_LANDMARKER_PATH,
-        MEDIAPIPE_POSE_LANDMARKER_PATH,
+        REPRESENTATIVES_MANUAL,
         get_gesture_metadata_path,
         get_gesture_model_path,
     )
     from ..model_training import GestureRecognizerModel
-    from ..video2gloss.inference_example import MediaPipeLandmarkExtractor
+    from ..landmark_extraction import LandmarkExtractor
     import mediapipe as mp
 except ImportError as e:
     print(f"Import error: {e}")
@@ -258,7 +256,7 @@ class Speech2VisualizationWidget(QWidget):
         super().__init__()
         self.recorder = AudioRecorder()
         self.audio_converter = AudioToGlossConverter()
-        self.generator = GestureTransitionGenerator(REPRESENTATIVES_LEFT)
+        self.generator = GestureTransitionGenerator(REPRESENTATIVES_MANUAL)
         self.is_recording = False
 
         self.setup_ui()
@@ -379,7 +377,7 @@ class Speech2VisualizationWidget(QWidget):
             fd, landmark_file = tempfile.mkstemp(suffix=".pkl")
             os.close(fd)
             glosses_lower = [g.lower() for g in glosses]
-            result = self.generator.generate_sequence(glosses_lower, 4, landmark_file)
+            result = self.generator.generate_sequence(glosses_lower, 10, landmark_file)
 
             if result["denied_glosses"]:
                 self.update_status_signal.emit(
@@ -429,25 +427,75 @@ class VideoProcessor(QObject):
         self.model.eval()
 
         # Initialize landmark extractor
-        self.landmark_extractor = MediaPipeLandmarkExtractor(
-            MEDIAPIPE_HAND_LANDMARKER_PATH,
-            MEDIAPIPE_POSE_LANDMARKER_PATH,
-            self.model_info["feature_info"],
-        )
+        self.landmark_extractor = LandmarkExtractor(use_pose=True)
+        self.feature_info = self.model_info["feature_info"]
+        self.frame_counter = 0
+        self.last_processed_features = None
 
         self.sequence_length = self.model_info["sequence_length"]
         self.feature_queue = deque(maxlen=self.sequence_length)
         self.detected_glosses = []
         self.last_prediction = ""
 
+    def extract_features_from_frame_data(self, frame_data: dict) -> np.ndarray:
+        """Extract features using same logic as training script"""
+        features = []
+
+        # Hand landmarks
+        if self.feature_info["hand_landmarks"] > 0:
+            max_hands = self.feature_info["max_hands"]
+            hand_dim_per_hand = self.feature_info["hand_landmarks_per_hand"]
+            hand_features = np.zeros(self.feature_info["hand_landmarks"])
+
+            if frame_data.get("hands"):
+                for i, hand_data in enumerate(frame_data["hands"][:max_hands]):
+                    if hand_data and "landmarks" in hand_data:
+                        landmarks = np.array(hand_data["landmarks"][:21])[:, :3].flatten()
+                        start_idx = i * hand_dim_per_hand
+                        end_idx = start_idx + len(landmarks)
+                        hand_features[start_idx:end_idx] = landmarks
+            features.extend(hand_features)
+
+        # Pose landmarks
+        if self.feature_info["pose_landmarks"] > 0:
+            pose_features = np.zeros(self.feature_info["pose_landmarks"])
+            if frame_data.get("pose") and frame_data["pose"]:
+                landmarks = np.array(frame_data["pose"]["landmarks"])
+                if len(landmarks.shape) > 1 and landmarks.shape[1] > 3:
+                    landmarks = landmarks[:, :3]
+                landmarks_flat = landmarks.flatten()
+                pose_features[: min(len(landmarks_flat), len(pose_features))] = (
+                    landmarks_flat[: len(pose_features)]
+                )
+            features.extend(pose_features)
+
+        return np.array(features, dtype=np.float32)
+
+    def process_frame_with_skip(self, frame):
+        """Process frame with 2_skip pattern"""
+        frame_index = self.frame_counter
+        self.frame_counter += 1
+
+        should_process = frame_index % 3 == 0
+
+        if should_process:
+            frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
+            current_features = self.extract_features_from_frame_data(frame_data)
+            self.last_processed_features = current_features
+            return [current_features]
+        else:
+            if self.last_processed_features is not None:
+                return [self.last_processed_features.copy()]
+            else:
+                return [np.zeros(self.feature_info["total_features"], dtype=np.float32)]
+
     def process_video_file(self, video_path):
         """Process video file"""
         self.is_processing = True
         self.detected_glosses = []
         self.feature_queue.clear()
-        self.landmark_extractor.frame_counter = 0
-        self.landmark_extractor.frame_buffer = []
-        self.landmark_extractor.last_processed_features = None
+        self.frame_counter = 0
+        self.last_processed_features = None
         self.last_prediction = ""
 
         thread = threading.Thread(target=self._process_video_file, args=(video_path,))
@@ -463,8 +511,8 @@ class VideoProcessor(QObject):
                 if not ret:
                     break
 
-                feature_list = self.landmark_extractor.process_frame(frame)
-
+                feature_list = self.process_frame_with_skip(frame)
+                
                 for features in feature_list:
                     self.feature_queue.append(features)
 

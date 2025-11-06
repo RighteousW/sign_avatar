@@ -27,11 +27,15 @@ MEDIAPIPE_POSE_LANDMARKER_PATH = DEPENDENCY_MODELS_DIR / "pose_landmarker_lite.t
 # Special Paths
 GLOSS2TEXT_MODEL_SYNTHETIC = (
     GLOSS2TEXT_LOGS
-    / "synthetic_MediTOD_batch-size8_hidden-size256_epochs5_timestamp20251029_133529"
+    / "synthetic_MediTOD+gesture_vocab_batch-size32_hidden-size256_epochs5_timestamp20251106_064944"
 )
 GLOSS2TEXT_MODEL_SYNTHETIC_QUANTIZED = GLOSS2TEXT_MODEL_SYNTHETIC / "quantized"
 REPRESENTATIVES_LEFT = OUTPUT_DIR / "gesture_metadata" / "representatives_left.json"
-LANDMARKS_DIR_METADATA_PKL = LANDMARKS_DIR_HANDS_ONLY / "landmarks_metadata.pkl"
+REPRESENTATIVES_MANUAL = OUTPUT_DIR  / "gesture_metadata" /"gesture_representatives_metadata.json"
+LANDMARKS_DIR_HANDS_ONLY_METADATA_PKL = LANDMARKS_DIR_HANDS_ONLY / "landmarks_metadata.pkl"
+LANDMARKS_DIR_HANDS_POSE_METADATA_PKL = (
+    LANDMARKS_DIR_HANDS_POSE / "landmarks_metadata.pkl"
+)
 
 
 def get_gesture_model_path(use_pose: bool, skip_pattern: int) -> Path:
