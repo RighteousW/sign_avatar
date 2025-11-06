@@ -1,4 +1,3 @@
-import os
 import cv2
 import torch
 import pickle
@@ -9,7 +8,6 @@ from mediapipe.tasks.python import vision
 import time
 import json
 from pathlib import Path
-from collections import defaultdict
 import argparse
 
 from ..constants import (
@@ -482,7 +480,7 @@ def main():
     parser.add_argument(
         "--use_pose",
         action="store_true",
-        default=False,
+        default=True,
         help="Use pose landmarks (Hands+Pose model)",
     )
     parser.add_argument(
@@ -495,7 +493,7 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default=None,
+        default="0-skip_hands_pose_improvement_metrics.json",
         help="Output JSON file for results (optional)",
     )
 

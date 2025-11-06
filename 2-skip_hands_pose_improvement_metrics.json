@@ -1,0 +1,43 @@
+{
+  "model_config": {
+    "type": "Hands+Pose",
+    "skip_rate": 2,
+    "device": "cpu",
+    "sequence_length": 30
+  },
+  "frame_processing": {
+    "mean_ms": 182.6544534947171,
+    "std_ms": 67.20132404321592,
+    "min_ms": 42.12448498583399,
+    "max_ms": 313.65324498619884,
+    "total_samples": 414
+  },
+  "mediapipe_hand": {
+    "mean_ms": 117.23208539071211,
+    "std_ms": 49.185795066474746
+  },
+  "mediapipe_pose": {
+    "mean_ms": 64.6728824075831,
+    "std_ms": 23.856106588253656
+  },
+  "feature_extraction": {
+    "mean_ms": 0.3134411156367609,
+    "std_ms": 0.11025524064206925
+  },
+  "model_inference": {
+    "mean_ms": 2.5521490797070805,
+    "std_ms": 0.5833005253089799,
+    "min_ms": 1.6913579893298447,
+    "max_ms": 4.108999011805281,
+    "total_samples": 113
+  },
+  "total_sequence_processing": {
+    "mean_ms": 1768.030356752656,
+    "description": "Time to process one complete 30-frame sequence (feature extraction + inference)"
+  },
+  "computational_efficiency": {
+    "frames_processed_per_skip": "1 out of 3",
+    "actual_mediapipe_calls_per_sequence": 10,
+    "efficiency_gain_vs_0skip": "66.7%"
+  }
+}
