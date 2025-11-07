@@ -1,4 +1,4 @@
-from scipy import io
+import io
 import speech_recognition as sr
 
 def audio_data_to_text(recognizer: sr.Recognizer, audio_data: sr.AudioData) -> str:

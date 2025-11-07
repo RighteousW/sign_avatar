@@ -193,7 +193,7 @@ def _get_gloss_token(
         word = token.lemma_
 
     # Map to valid gloss
-    mapped_gloss = _map_to_valid_gloss(word, word_to_gloss_map, valid_glosses, valid_glosses)
+    mapped_gloss = _map_to_valid_gloss(word, word_to_gloss_map, valid_glosses)
     return mapped_gloss
 
 def _is_content_word(token) -> bool:
