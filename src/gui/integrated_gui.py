@@ -2,7 +2,7 @@
 Integrated NSL Translation System
 Two main pipelines:
 1. Speech-to-Visualization: Speech → Text → Gloss → Avatar
-2. Video-to-Audio: Video → Gloss → Text → Audio
+2. Video-to-Audio: Video → Gloss → Text → Audio (with recording option)
 """
 
 import sys
@@ -27,6 +27,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QTabWidget,
     QFileDialog,
+    QMessageBox,
+    QButtonGroup,
+    QRadioButton,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QKeyEvent
@@ -39,9 +42,14 @@ try:
         REPRESENTATIVES_MANUAL,
         get_gesture_metadata_path,
         get_gesture_model_path,
+        FRAME_RATE,
+        FRAME_WIDTH,
+        FRAME_HEIGHT,
     )
+    from ..utils.interpolation import interpolate_missing_frames, apply_frame_skipping
     from ..model_training import GestureRecognizerModel
     from ..landmark_extraction import LandmarkExtractor
+    from ..data_creation.video_recording import VideoRecorder, FrameTimer
     import mediapipe as mp
 except ImportError as e:
     print(f"Import error: {e}")
@@ -395,6 +403,87 @@ class Speech2VisualizationWidget(QWidget):
         self.update_status_signal.emit(error_msg)
 
 
+class VideoRecordingCapture(QObject):
+    """Handles video recording from webcam - imported from record_video2gloss_gui"""
+
+    frame_ready = pyqtSignal(object)
+    recording_saved = pyqtSignal(str)  # Returns single video path
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.is_recording = False
+        self.video_recorder = None
+        self.frame_timer = None
+
+    def start_recording(self, filename="recorded_sign"):
+        """Start recording"""
+        self.is_recording = True
+        self.video_recorder = VideoRecorder(filename)
+        self.frame_timer = FrameTimer(FRAME_RATE)
+
+        thread = threading.Thread(target=self._record)
+        thread.daemon = True
+        thread.start()
+
+    def _record(self):
+        try:
+            cap = cv2.VideoCapture(0)
+
+            if not cap.isOpened():
+                self.error_occurred.emit("Could not open camera")
+                return
+
+            # Setup camera
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+            actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            # Start video recording
+            self.video_recorder.start_recording(actual_width, actual_height, FRAME_RATE)
+
+            while self.is_recording and cap.isOpened():
+                # Wait for proper frame timing
+                self.frame_timer.wait_for_next_frame()
+
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Save frame
+                self.video_recorder.add_frame(frame)
+
+                # Display frame with REC indicator
+                display_frame = frame.copy()
+                rec_text = f"REC [{self.video_recorder.frame_count}]"
+                cv2.putText(
+                    display_frame,
+                    rec_text,
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 0, 255),
+                    2,
+                )
+
+                self.frame_ready.emit(display_frame)
+
+            cap.release()
+
+            # Save recording
+            if self.video_recorder:
+                saved_paths = self.video_recorder.stop_recording()
+                # Return the first path (original, not flipped)
+                self.recording_saved.emit(saved_paths[0])
+
+        except Exception as e:
+            self.error_occurred.emit(f"Recording error: {str(e)}")
+
+    def stop_recording(self):
+        self.is_recording = False
+
+
 class VideoProcessor(QObject):
     """Processes video file and detects glosses"""
 
@@ -429,8 +518,6 @@ class VideoProcessor(QObject):
         # Initialize landmark extractor
         self.landmark_extractor = LandmarkExtractor(use_pose=True)
         self.feature_info = self.model_info["feature_info"]
-        self.frame_counter = 0
-        self.last_processed_features = None
 
         self.sequence_length = self.model_info["sequence_length"]
         self.feature_queue = deque(maxlen=self.sequence_length)
@@ -450,7 +537,9 @@ class VideoProcessor(QObject):
             if frame_data.get("hands"):
                 for i, hand_data in enumerate(frame_data["hands"][:max_hands]):
                     if hand_data and "landmarks" in hand_data:
-                        landmarks = np.array(hand_data["landmarks"][:21])[:, :3].flatten()
+                        landmarks = np.array(hand_data["landmarks"][:21])[
+                            :, :3
+                        ].flatten()
                         start_idx = i * hand_dim_per_hand
                         end_idx = start_idx + len(landmarks)
                         hand_features[start_idx:end_idx] = landmarks
@@ -471,31 +560,40 @@ class VideoProcessor(QObject):
 
         return np.array(features, dtype=np.float32)
 
+
     def process_frame_with_skip(self, frame):
-        """Process frame with 2_skip pattern"""
-        frame_index = self.frame_counter
-        self.frame_counter += 1
+        """Process frame and collect for skip pattern processing"""
+        frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
+        current_features = self.extract_features_from_frame_data(frame_data)
 
-        should_process = frame_index % 3 == 0
+        # Always add to temporary buffer
+        if not hasattr(self, "frame_buffer"):
+            self.frame_buffer = []
 
-        if should_process:
-            frame_data = self.landmark_extractor.extract_landmarks_from_frame(frame)
-            current_features = self.extract_features_from_frame_data(frame_data)
-            self.last_processed_features = current_features
-            return [current_features]
-        else:
-            if self.last_processed_features is not None:
-                return [self.last_processed_features.copy()]
-            else:
-                return [np.zeros(self.feature_info["total_features"], dtype=np.float32)]
+        self.frame_buffer.append(current_features)
 
+        # Process when we have enough frames for the skip pattern
+        skip_pattern = 2  # Using 2_skip model
+        window_size = 6  # For 2_skip: [0,1,2,3,4,5] -> keep [0,3], interpolate rest
+
+        if len(self.frame_buffer) >= window_size:
+            # Apply skip pattern and interpolation to the window
+            interpolated_frames = apply_frame_skipping(
+                self.frame_buffer[:window_size], skip_pattern
+            )
+
+            # Remove processed frames from buffer (keep last few for continuity)
+            self.frame_buffer = self.frame_buffer[3:]  # Keep last 3 frames
+
+            return interpolated_frames
+
+        return []
+    
     def process_video_file(self, video_path):
         """Process video file"""
         self.is_processing = True
         self.detected_glosses = []
         self.feature_queue.clear()
-        self.frame_counter = 0
-        self.last_processed_features = None
         self.last_prediction = ""
 
         thread = threading.Thread(target=self._process_video_file, args=(video_path,))
@@ -512,7 +610,7 @@ class VideoProcessor(QObject):
                     break
 
                 feature_list = self.process_frame_with_skip(frame)
-                
+
                 for features in feature_list:
                     self.feature_queue.append(features)
 
@@ -578,7 +676,7 @@ class VideoProcessor(QObject):
 
 
 class Video2AudioWidget(QWidget):
-    """Pipeline: Video → Gloss → Text → Audio"""
+    """Pipeline: Video → Gloss → Text → Audio (with recording option)"""
 
     update_gloss_signal = pyqtSignal(str)
     update_text_signal = pyqtSignal(str)
@@ -587,9 +685,11 @@ class Video2AudioWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.processor = VideoProcessor()
+        self.recorder = VideoRecordingCapture()  # Add recorder
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.translator = None
         self.current_video_path = None
+        self.is_recording = False
 
         self.setup_ui()
         self.setup_connections()
@@ -602,6 +702,34 @@ class Video2AudioWidget(QWidget):
         self.status_label = QLabel("Loading translator...")
         layout.addWidget(self.status_label)
 
+        # Video source selection
+        source_widget = QWidget()
+        source_layout = QHBoxLayout()
+
+        self.source_group = QButtonGroup()
+        self.file_radio = QRadioButton("Select File")
+        self.record_radio = QRadioButton("Record New")
+        self.file_radio.setChecked(True)
+
+        self.source_group.addButton(self.file_radio)
+        self.source_group.addButton(self.record_radio)
+
+        source_layout.addWidget(QLabel("Video Source:"))
+        source_layout.addWidget(self.file_radio)
+        source_layout.addWidget(self.record_radio)
+        source_layout.addStretch()
+
+        source_widget.setLayout(source_layout)
+        layout.addWidget(source_widget)
+
+        # Video display (for recording preview)
+        self.video_label = QLabel("Camera preview will appear here during recording")
+        self.video_label.setMinimumHeight(300)
+        self.video_label.setStyleSheet("background-color: black; color: gray;")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.hide()
+        layout.addWidget(self.video_label)
+
         # File selection
         file_layout = QHBoxLayout()
         self.file_label = QLabel("No file selected")
@@ -611,12 +739,33 @@ class Video2AudioWidget(QWidget):
         self.select_btn.clicked.connect(self.select_video)
         file_layout.addWidget(self.select_btn)
 
-        self.process_btn = QPushButton("Process")
+        layout.addLayout(file_layout)
+
+        # Recording controls
+        rec_layout = QHBoxLayout()
+
+        self.start_rec_btn = QPushButton("Start Recording")
+        self.start_rec_btn.clicked.connect(self.start_recording)
+        self.start_rec_btn.hide()
+        rec_layout.addWidget(self.start_rec_btn)
+
+        self.stop_rec_btn = QPushButton("Stop Recording")
+        self.stop_rec_btn.clicked.connect(self.stop_recording)
+        self.stop_rec_btn.setEnabled(False)
+        self.stop_rec_btn.hide()
+        rec_layout.addWidget(self.stop_rec_btn)
+
+        rec_layout.addStretch()
+        layout.addLayout(rec_layout)
+
+        # Process button
+        process_layout = QHBoxLayout()
+        self.process_btn = QPushButton("Process Video")
         self.process_btn.clicked.connect(self.process_video)
         self.process_btn.setEnabled(False)
-        file_layout.addWidget(self.process_btn)
-
-        layout.addLayout(file_layout)
+        process_layout.addWidget(self.process_btn)
+        process_layout.addStretch()
+        layout.addLayout(process_layout)
 
         # Detected glosses
         layout.addWidget(QLabel("Detected Glosses:"))
@@ -643,10 +792,44 @@ class Video2AudioWidget(QWidget):
 
         self.setLayout(layout)
 
+        # Connect radio button changes
+        self.file_radio.toggled.connect(self.on_source_changed)
+
+    def on_source_changed(self):
+        """Handle video source selection change"""
+        is_file_mode = self.file_radio.isChecked()
+
+        # Show/hide appropriate controls
+        self.select_btn.setVisible(is_file_mode)
+        self.file_label.setVisible(is_file_mode)
+        self.start_rec_btn.setVisible(not is_file_mode)
+        self.stop_rec_btn.setVisible(not is_file_mode)
+
+        if not is_file_mode:
+            self.video_label.show()
+            self.video_label.setText("Click 'Start Recording' to begin")
+        else:
+            self.video_label.hide()
+
+        # Reset state
+        self.current_video_path = None
+        self.process_btn.setEnabled(False)
+        self.play_audio_btn.setEnabled(False)
+        self.gloss_output.clear()
+        self.text_output.clear()
+
     def setup_connections(self):
+        # Video processor connections
         self.processor.gloss_detected.connect(self.on_gloss_detected)
         self.processor.processing_complete.connect(self.on_processing_complete)
         self.processor.error_occurred.connect(self.on_error)
+
+        # Recording connections
+        self.recorder.frame_ready.connect(self.update_frame)
+        self.recorder.recording_saved.connect(self.on_recording_saved)
+        self.recorder.error_occurred.connect(self.on_error)
+
+        # UI update signals
         self.update_gloss_signal.connect(self.gloss_output.setText)
         self.update_text_signal.connect(self.text_output.setText)
         self.update_status_signal.connect(self.status_label.setText)
@@ -660,14 +843,17 @@ class Video2AudioWidget(QWidget):
     def _load_translator(self):
         try:
             self.translator = Gloss2Text(self.device)
-            self.update_status_signal.emit("Ready - Select a video file")
+            self.update_status_signal.emit("Ready - Select video source")
         except Exception as e:
             self.update_status_signal.emit(f"Error loading translator: {str(e)}")
 
     def select_video(self):
         """Open file dialog to select video"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Video File", "", "Video Files (*.mp4 *.avi *.mov *.mkv)"
+            self,
+            "Select Video File",
+            "data/demo_videos",  # Starting directory as 3rd positional argument
+            "Video Files (*.mp4 *.avi *.mov *.mkv)",
         )
         if file_path:
             self.current_video_path = file_path
@@ -676,8 +862,63 @@ class Video2AudioWidget(QWidget):
             self.play_audio_btn.setEnabled(False)
             self.update_status_signal.emit("Ready to process")
 
+    def start_recording(self):
+        """Start video recording"""
+        self.is_recording = True
+        self.update_status_signal.emit("Recording...")
+        self.start_rec_btn.setEnabled(False)
+        self.stop_rec_btn.setEnabled(True)
+        self.process_btn.setEnabled(False)
+        self.file_radio.setEnabled(False)
+        self.record_radio.setEnabled(False)
+
+        self.video_label.setText("Recording...")
+        self.recorder.start_recording("sign_recording")
+
+    def stop_recording(self):
+        """Stop video recording"""
+        self.recorder.stop_recording()
+        self.update_status_signal.emit("Saving recording...")
+        self.stop_rec_btn.setEnabled(False)
+
+    def update_frame(self, frame):
+        """Update video display during recording"""
+        if frame is not None:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_frame.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(
+                rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888
+            )
+
+            scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
+                self.video_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.video_label.setPixmap(scaled_pixmap)
+
+    def on_recording_saved(self, video_path):
+        """Handle video recording saved"""
+        self.current_video_path = video_path
+        self.is_recording = False
+
+        self.update_status_signal.emit("Recording saved! Ready to process")
+
+        QMessageBox.information(
+            self,
+            "Recording Saved",
+            f"Video saved to:\n{os.path.basename(video_path)}\n\n"
+            "Click 'Process Video' to detect glosses and generate audio",
+        )
+
+        self.start_rec_btn.setEnabled(True)
+        self.process_btn.setEnabled(True)
+        self.file_radio.setEnabled(True)
+        self.record_radio.setEnabled(True)
+
     def process_video(self):
-        """Start processing the selected video"""
+        """Start processing the selected/recorded video"""
         if not self.current_video_path:
             return
 
@@ -685,6 +926,7 @@ class Video2AudioWidget(QWidget):
         self.text_output.clear()
         self.update_status_signal.emit("Processing video...")
         self.select_btn.setEnabled(False)
+        self.start_rec_btn.setEnabled(False)
         self.process_btn.setEnabled(False)
         self.play_audio_btn.setEnabled(False)
 
@@ -713,6 +955,7 @@ class Video2AudioWidget(QWidget):
         else:
             self.update_status_signal.emit("No glosses detected")
             self.select_btn.setEnabled(True)
+            self.start_rec_btn.setEnabled(True)
             self.process_btn.setEnabled(True)
 
     def _translate_glosses(self, glosses):
@@ -725,11 +968,13 @@ class Video2AudioWidget(QWidget):
             self.update_status_signal.emit("Translation complete - Ready to play audio")
             self.play_audio_btn.setEnabled(True)
             self.select_btn.setEnabled(True)
+            self.start_rec_btn.setEnabled(True)
             self.process_btn.setEnabled(True)
 
         except Exception as e:
             self.update_status_signal.emit(f"Translation error: {str(e)}")
             self.select_btn.setEnabled(True)
+            self.start_rec_btn.setEnabled(True)
             self.process_btn.setEnabled(True)
 
     def play_audio(self):
@@ -749,7 +994,6 @@ class Video2AudioWidget(QWidget):
         try:
             from gtts import gTTS
             import tempfile
-            import os
 
             # Generate audio
             tts = gTTS(text=text, lang="en")
@@ -777,7 +1021,10 @@ class Video2AudioWidget(QWidget):
     def on_error(self, error_msg):
         self.update_status_signal.emit(f"Error: {error_msg}")
         self.select_btn.setEnabled(True)
+        self.start_rec_btn.setEnabled(True)
         self.process_btn.setEnabled(True)
+        self.file_radio.setEnabled(True)
+        self.record_radio.setEnabled(True)
 
 
 class IntegratedNSLSystem(QTabWidget):
@@ -794,7 +1041,7 @@ class IntegratedNSLSystem(QTabWidget):
         self.speech2viz = Speech2VisualizationWidget()
         self.addTab(self.speech2viz, "Speech → Visualization")
 
-        # Pipeline 2: Video → Audio
+        # Pipeline 2: Video → Audio (with recording option)
         self.video2audio = Video2AudioWidget()
         self.addTab(self.video2audio, "Video → Audio")
 
@@ -803,7 +1050,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("NSL Integrated Translation System")
-        self.setGeometry(100, 100, 900, 700)
+        self.setGeometry(100, 100, 900, 800)
 
         # Apply stylesheet
         try:
@@ -839,6 +1086,9 @@ class MainWindow(QMainWindow):
                     border-radius: 4px;
                 }
                 QLabel {
+                    color: #e0e0e0;
+                }
+                QRadioButton {
                     color: #e0e0e0;
                 }
             """

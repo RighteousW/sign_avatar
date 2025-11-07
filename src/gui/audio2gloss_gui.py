@@ -20,7 +20,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QKeyEvent
 
 try:
-    from ..audio2gloss import AudioToGlossConverter, NaiveNSLGlossConverter
+    from ..audio2gloss import AudioToGlossConverter
 except ImportError:
     print("Import error: Ensure audio2gloss module is available")
 

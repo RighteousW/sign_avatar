@@ -27,6 +27,7 @@ from ..constants import (
     get_gesture_metadata_path,
     get_gesture_model_path,
 )
+from ..utils.interpolation import apply_frame_skipping
 
 torch.manual_seed(42)
 np.random.seed(42)
@@ -130,62 +131,6 @@ class LandmarkDataLoader:
 
         return np.array(features, dtype=np.float32)
 
-    def interpolate_missing_frames(
-        self, sequence: List[np.ndarray], skip_indices: List[int]
-    ) -> List[np.ndarray]:
-        """Interpolate missing frames using cubic spline interpolation"""
-        if not skip_indices or len(sequence) < 3:
-            return sequence
-
-        sequence_array = np.array(sequence)
-        interpolated = sequence_array.copy()
-        available = [i for i in range(len(sequence)) if i not in skip_indices]
-
-        if len(available) < 2:
-            return sequence
-
-        for dim in range(sequence_array.shape[1]):
-            values = sequence_array[available, dim]
-            if np.all(values == values[0]):
-                interpolated[skip_indices, dim] = values[0]
-                continue
-
-            try:
-                kind = "cubic" if len(available) >= 4 else "linear"
-                interp_func = interpolate.interp1d(
-                    available,
-                    values,
-                    kind=kind,
-                    bounds_error=False,
-                    fill_value="extrapolate",
-                )
-                interpolated[skip_indices, dim] = interp_func(skip_indices)
-            except Exception:
-                for skip_idx in skip_indices:
-                    nearest = min(available, key=lambda x: abs(x - skip_idx))
-                    interpolated[skip_idx, dim] = sequence_array[nearest, dim]
-
-        return list(interpolated)
-
-    def apply_frame_skipping(
-        self, sequence: List[np.ndarray], skip_pattern: int
-    ) -> List[np.ndarray]:
-        """Apply frame skipping pattern and interpolate missing frames"""
-        if skip_pattern == 0 or len(sequence) < 3:
-            return sequence
-
-        skip_indices = (
-            list(range(1, len(sequence), 2))
-            if skip_pattern == 1
-            else [i for i in range(len(sequence)) if i % 3 != 0]
-        )
-
-        modified = [
-            np.zeros_like(frame) if i in skip_indices else frame
-            for i, frame in enumerate(sequence)
-        ]
-        return self.interpolate_missing_frames(modified, skip_indices)
-
     def pad_or_truncate_sequence(
         self, sequence: List, target_length: int, feature_size: int
     ) -> np.ndarray:
@@ -230,7 +175,7 @@ class LandmarkDataLoader:
                     ]
 
                     if skip_pattern > 0:
-                        frame_features = self.apply_frame_skipping(
+                        frame_features = apply_frame_skipping(
                             frame_features, skip_pattern
                         )
 
