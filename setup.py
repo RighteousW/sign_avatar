@@ -65,8 +65,20 @@ setup(
     install_requires=parse_requirements("requirements.txt"),
     entry_points={
         "console_scripts": [
-            # GUI applications
-            "nsl-gui=src.gui.integrated_gui:main",
+            # demos
+            # integrated one
+            "integrated-demo=src.demos.integrated_demo:main",
+            
+            #audio2visualization pipeline
+            "audio2text-demo=src.demos.audio2text_demo:main",
+            "text2gloss-demo=src.demos.text2gloss_demo:main",
+            "gloss2visualization-demo=src.demos.gloss2visualization_demo:main",
+            
+            # video2speech pipeline
+            "video2gloss-file-demo=src.demos.video2gloss_file_demo:main",
+            "video2gloss-record-demo=src.demos.video2gloss_record_demo:main",
+            "gloss2text-demo=src.demos.gloss2text_demo:main",
+            "text2speech-demo=src.demos.text2speech_demo:main",
         ],
     },
 )
