@@ -1,2 +1,9 @@
 [console_scripts]
-nsl-gui = src.gui.integrated_gui:main
+audio2text-demo = src.demos.audio2text_demo:main
+gloss2text-demo = src.demos.gloss2text_demo:main
+gloss2visualization-demo = src.demos.gloss2visualization_demo:main
+integrated-demo = src.demos.integrated_demo:main
+text2gloss-demo = src.demos.text2gloss_demo:main
+text2speech-demo = src.demos.text2speech_demo:main
+video2gloss-file-demo = src.demos.video2gloss_file_demo:main
+video2gloss-record-demo = src.demos.video2gloss_record_demo:main
