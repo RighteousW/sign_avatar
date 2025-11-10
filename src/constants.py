@@ -38,28 +38,37 @@ LANDMARKS_DIR_HANDS_POSE_METADATA_PKL = (
 )
 
 
-def get_gesture_model_path(use_pose: bool, skip_pattern: int) -> Path:
+def get_gesture_model_path(
+    use_pose: bool, skip_pattern: int, model_type: str = "cnn"
+) -> Path:
     """Get gesture model path dynamically
     Args:
         use_pose: True for hands+pose model, False for hands-only
         skip_pattern: 0, 1, or 2
+        model_type: "cnn" or "lstm"
     """
     base_dir = (
         GESTURE_MODEL_HANDS_POSE_DIR if use_pose else GESTURE_MODEL_HANDS_ONLY_DIR
     )
-    return base_dir / f"gesture_model_{skip_pattern}_skip.pth"
+    suffix = f"_{model_type}" if model_type != "cnn" else ""
+    return base_dir / f"gesture_model_{skip_pattern}_skip{suffix}.pth"
 
 
-def get_gesture_metadata_path(use_pose: bool, skip_pattern: int) -> Path:
+def get_gesture_metadata_path(
+    use_pose: bool, skip_pattern: int, model_type: str = "cnn"
+) -> Path:
     """Get gesture model metadata path dynamically
     Args:
         use_pose: True for hands+pose model, False for hands-only
         skip_pattern: 0, 1, or 2
+        model_type: "cnn" or "lstm"
     """
     base_dir = (
         GESTURE_MODEL_HANDS_POSE_DIR if use_pose else GESTURE_MODEL_HANDS_ONLY_DIR
     )
-    return base_dir / f"gesture_model_metadata_{skip_pattern}_skip.pkl"
+    suffix = f"_{model_type}" if model_type != "cnn" else ""
+    return base_dir / f"gesture_model_metadata_{skip_pattern}_skip{suffix}.pkl"
+
 
 # Hyperparameters
 DEFAULT_SEQUENCE_LENGTH = 30

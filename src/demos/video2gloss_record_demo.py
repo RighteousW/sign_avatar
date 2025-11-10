@@ -4,7 +4,6 @@ Record video from webcam -> Detect glosses in real-time
 """
 
 import sys
-import os
 import threading
 import pickle
 import numpy as np
@@ -31,8 +30,8 @@ try:
         get_gesture_metadata_path,
         get_gesture_model_path,
     )
-    from ..data_creation.video_recording import VideoRecorder, FrameTimer
-    from ..model_training import GestureRecognizerModel
+    from ..data_creation.video_recording import FrameTimer
+    from ..model_training import GestureRecognizerCNN
     from ..landmark_extraction import LandmarkExtractor
     from ..utils.interpolation import apply_frame_skipping
 except ImportError:
@@ -45,8 +44,8 @@ except ImportError:
             get_gesture_metadata_path,
             get_gesture_model_path,
         )
-        from ..data_creation.video_recording import VideoRecorder, FrameTimer
-        from ..model_training import GestureRecognizerModel
+        from ..data_creation.video_recording import FrameTimer
+        from ..model_training import GestureRecognizerCNN
         from ..landmark_extraction import LandmarkExtractor
         from ..utils.interpolation import apply_frame_skipping
     except ImportError:
@@ -71,7 +70,7 @@ class VideoRecordingProcessor(QObject):
         with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.model_info = pickle.load(f)
 
-        self.model = GestureRecognizerModel(
+        self.model = GestureRecognizerCNN(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],
@@ -268,7 +267,7 @@ class Video2GlossRecordWidget(QWidget):
 
         # Title
         title = QLabel("Video to Gloss - Recording Demo")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 10px;")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; padding: 5px;")
         layout.addWidget(title)
 
         # Status
@@ -278,19 +277,19 @@ class Video2GlossRecordWidget(QWidget):
 
         # Video display
         self.video_display = VideoDisplayLabel("Camera preview will appear here")
-        layout.addWidget(self.video_display, 60)
+        layout.addWidget(self.video_display, 50)
 
         # Current detection display
         detection_layout = QHBoxLayout()
         detection_layout.addWidget(QLabel("Current Detection:"))
         self.current_gloss_label = QLabel("---")
         self.current_gloss_label.setStyleSheet(
-            "font-size: 20px; font-weight: bold; color: #14a085; padding: 10px;"
+            "font-size: 20px; font-weight: bold; color: #14a085; padding: 5px;"
         )
         detection_layout.addWidget(self.current_gloss_label)
 
         self.current_confidence_label = QLabel("")
-        self.current_confidence_label.setStyleSheet("font-size: 14px; padding: 10px;")
+        self.current_confidence_label.setStyleSheet("font-size: 14px; padding: 5px;")
         detection_layout.addWidget(self.current_confidence_label)
         detection_layout.addStretch()
         layout.addLayout(detection_layout)
@@ -320,7 +319,7 @@ class Video2GlossRecordWidget(QWidget):
 
         self.sequence_display = QLabel("No sequences detected yet")
         self.sequence_display.setStyleSheet(
-            "background-color: #2b2b2b; padding: 15px; border-radius: 4px; font-size: 13px;"
+            "background-color: #2b2b2b; padding: 5px; border-radius: 4px; font-size: 13px;"
         )
         self.sequence_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         history_layout.addWidget(self.sequence_display, 80)

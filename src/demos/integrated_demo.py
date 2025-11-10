@@ -27,15 +27,12 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QTabWidget,
     QFileDialog,
-    QMessageBox,
-    QButtonGroup,
-    QRadioButton,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QKeyEvent
 
 try:
-    from demo_utils import get_dark_stylesheet, LandmarkCanvas, VideoDisplayLabel
+    from .demo_utils import get_dark_stylesheet, LandmarkCanvas, VideoDisplayLabel
     from ..audio2gloss import AudioToGlossConverter
     from ..gloss2visualization import GestureTransitionGenerator
     from ..gloss2audio import Gloss2Text
@@ -43,37 +40,16 @@ try:
         REPRESENTATIVES_MANUAL,
         get_gesture_metadata_path,
         get_gesture_model_path,
-        FRAME_RATE,
         FRAME_WIDTH,
         FRAME_HEIGHT,
     )
     from ..utils.interpolation import apply_frame_skipping
-    from ..model_training import GestureRecognizerModel
+    from ..model_training import GestureRecognizerCNN, GestureRecognizerLSTM
     from ..landmark_extraction import LandmarkExtractor
-    from ..data_creation.video_recording import VideoRecorder, FrameTimer
 except ImportError:
-    try:
-        from .demo_utils import get_dark_stylesheet, LandmarkCanvas, VideoDisplayLabel
-        from ..audio2gloss import AudioToGlossConverter
-        from ..gloss2visualization import GestureTransitionGenerator
-        from ..gloss2audio import Gloss2Text
-        from ..constants import (
-            REPRESENTATIVES_MANUAL,
-            get_gesture_metadata_path,
-            get_gesture_model_path,
-            FRAME_RATE,
-            FRAME_WIDTH,
-            FRAME_HEIGHT,
-        )
-        from ..utils.interpolation import apply_frame_skipping
-        from ..model_training import GestureRecognizerModel
-        from ..landmark_extraction import LandmarkExtractor
-        from ..data_creation.video_recording import VideoRecorder, FrameTimer
-    except ImportError:
-        print("Import error - ensure modules are available")
+    print("Import error - ensure modules are available")
 
 
-# ==================== Audio Recorder ====================
 class AudioRecorder(QObject):
     """Handles audio recording"""
 
@@ -294,19 +270,36 @@ class VideoProcessor(QObject):
         self.is_processing = False
         self.confidence_threshold = 0.7
 
+        self.use_pose = False
+        self.skip_pattern = 2
+        self.model_type = "cnn"
+
         # Load model
-        with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
+        with open(str(get_gesture_metadata_path(self.use_pose, self.skip_pattern, self.model_type)), "rb") as f:
             self.model_info = pickle.load(f)
 
-        self.model = GestureRecognizerModel(
-            input_size=self.model_info["input_size"],
-            num_classes=len(self.model_info["class_names"]),
-            hidden_size=self.model_info["hidden_size"],
-            dropout=self.model_info["dropout"],
+        self.model = (
+            GestureRecognizerCNN(
+                input_size=self.model_info["input_size"],
+                num_classes=len(self.model_info["class_names"]),
+                hidden_size=self.model_info["hidden_size"],
+                dropout=self.model_info["dropout"],
+            )
+            if self.model_type == "cnn"
+            else GestureRecognizerLSTM(
+                input_size=self.model_info["input_size"],
+                num_classes=len(self.model_info["class_names"]),
+                hidden_size=self.model_info["hidden_size"],
+                dropout=self.model_info["dropout"],
+            )
         )
-
         checkpoint = torch.load(
-            str(get_gesture_model_path(False, 2)), map_location=self.device
+            str(
+                get_gesture_model_path(
+                    self.use_pose, self.skip_pattern, self.model_type
+                )
+            ),
+            map_location=self.device,
         )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
@@ -619,7 +612,8 @@ class Video2AudioWidget(QWidget):
 
     def _translate_glosses(self, glosses):
         try:
-            text = self.translator.infer(glosses)
+            capitalized_glosses = [gloss.capitalize() for gloss in glosses]
+            text = self.translator.infer(capitalized_glosses)
             text_str = " ".join(text).replace("_", " ")
 
             self.update_text_signal.emit(text_str)

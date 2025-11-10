@@ -33,36 +33,52 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 
-def get_path(skip_pattern: int, use_pose: bool, is_metadata: bool):
+def get_path(
+    skip_pattern: int, use_pose: bool, is_metadata: bool, model_type: str = "lstm"
+):
     """Get model or metadata file path for given skip pattern"""
     base_path = (
-        get_gesture_metadata_path(use_pose, skip_pattern)
+        get_gesture_metadata_path(use_pose, skip_pattern, model_type)
         if is_metadata
-        else get_gesture_model_path(use_pose, skip_pattern)
+        else get_gesture_model_path(use_pose, skip_pattern, model_type)
     )
     return base_path
 
 
-def save_training_metrics(metrics: Dict, output_dir: str, skip_pattern: int):
+def save_training_metrics(
+    metrics: Dict, output_dir: str, skip_pattern: int, model_type: str = "cnn"
+):
     """Save training metrics to JSON file"""
-    path = os.path.join(output_dir, f"training_metrics_skip_{skip_pattern}.json")
+    suffix = f"_{model_type}" if model_type != "cnn" else ""
+    path = os.path.join(
+        output_dir, f"training_metrics_skip_{skip_pattern}{suffix}.json"
+    )
     with open(path, "w") as f:
         json.dump(metrics, f, indent=2)
     print(f"Training metrics saved to {path}")
 
 
-def save_evaluation_metrics(metrics: Dict, output_dir: str, skip_pattern: int):
+def save_evaluation_metrics(
+    metrics: Dict, output_dir: str, skip_pattern: int, model_type: str = "cnn"
+):
     """Save evaluation metrics to JSON and confusion matrix to text"""
-    json_path = os.path.join(output_dir, f"evaluation_metrics_skip_{skip_pattern}.json")
+    suffix = f"_{model_type}" if model_type != "cnn" else ""
+    json_path = os.path.join(
+        output_dir, f"evaluation_metrics_skip_{skip_pattern}{suffix}.json"
+    )
     with open(json_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
     cm = np.array(metrics["confusion_matrix"])
     class_names = metrics["class_names"]
-    txt_path = os.path.join(output_dir, f"confusion_matrix_skip_{skip_pattern}.txt")
+    txt_path = os.path.join(
+        output_dir, f"confusion_matrix_skip_{skip_pattern}{suffix}.txt"
+    )
 
     with open(txt_path, "w") as f:
-        f.write(f"Confusion Matrix (Skip Pattern {skip_pattern})\n{'='*80}\n\n")
+        f.write(
+            f"Confusion Matrix ({model_type.upper()} - Skip Pattern {skip_pattern})\n{'='*80}\n\n"
+        )
         f.write(
             "True\\Pred".ljust(15)
             + "".join(n[:10].ljust(12) for n in class_names)
@@ -198,7 +214,42 @@ class LandmarkDataLoader:
         )
 
 
-class GestureRecognizerModel(nn.Module):
+class GestureRecognizerLSTM(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        num_classes: int,
+        hidden_size: int = 256,
+        dropout: float = 0.3,
+    ):
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=2,
+            batch_first=True,
+            dropout=dropout,
+            bidirectional=True,
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),  # *2 for bidirectional
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, num_classes),
+        )
+
+    def forward(self, x):
+        # x shape: (batch, sequence_length, input_size)
+        lstm_out, (h_n, c_n) = self.lstm(x)
+        # Use last hidden state from both directions
+        # h_n shape: (num_layers * num_directions, batch, hidden_size)
+        last_hidden = torch.cat(
+            [h_n[-2], h_n[-1]], dim=1
+        )  # Concatenate forward and backward
+        return self.classifier(last_hidden)
+
+
+class GestureRecognizerCNN(nn.Module):
     def __init__(
         self,
         input_size: int,
@@ -294,6 +345,7 @@ class ModelTrainer:
         model_path,
         output_dir: str,
         skip_pattern: int,
+        model_type: str = "lstm",
     ):
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.AdamW(
@@ -346,7 +398,7 @@ class ModelTrainer:
                     print(f"Early stopping at epoch {epoch+1}")
                     break
 
-        save_training_metrics(self.history, output_dir, skip_pattern)
+        save_training_metrics(self.history, output_dir, skip_pattern, model_type)
 
 
 def evaluate_model(
@@ -356,6 +408,7 @@ def evaluate_model(
     device: str,
     output_dir: str,
     skip_pattern: int,
+    model_type: str = "cnn",  # ADD THIS
 ):
     """Evaluate model and save metrics"""
     model.eval()
@@ -371,7 +424,9 @@ def evaluate_model(
             all_labels.extend(labels.cpu().numpy())
 
     accuracy = accuracy_score(all_labels, all_predictions)
-    print(f"Test Accuracy (Skip Pattern {skip_pattern}): {accuracy:.4f}")
+    print(
+        f"Test Accuracy ({model_type.upper()} - Skip Pattern {skip_pattern}): {accuracy:.4f}"
+    )
 
     report = classification_report(
         all_labels,
@@ -383,21 +438,28 @@ def evaluate_model(
     cm = confusion_matrix(all_labels, all_predictions)
 
     metrics = {
+        "model_type": model_type,
         "skip_pattern": skip_pattern,
         "test_accuracy": float(accuracy),
         "classification_report": report,
         "confusion_matrix": cm.tolist(),
         "class_names": class_names,
     }
-    save_evaluation_metrics(metrics, output_dir, skip_pattern)
+    save_evaluation_metrics(
+        metrics, output_dir, skip_pattern, model_type
+    )
 
 
-def train_single_model(args, skip_pattern: int):
+def train_single_model(args, skip_pattern: int, model_type: str = "lstm"):
     """Train a single model with specified skip pattern"""
     print(f"\n{'='*60}\nTraining model with skip pattern {skip_pattern}\n{'='*60}")
 
-    model_path = get_path(skip_pattern, args.use_pose, is_metadata=False)
-    metadata_path = get_path(skip_pattern, args.use_pose, is_metadata=True)
+    model_path = get_path(
+        skip_pattern, args.use_pose, is_metadata=False, model_type=model_type
+    )
+    metadata_path = get_path(
+        skip_pattern, args.use_pose, is_metadata=True, model_type=model_type
+    )
     model_dir = (
         GESTURE_MODEL_HANDS_POSE_DIR if args.use_pose else GESTURE_MODEL_HANDS_ONLY_DIR
     )
@@ -411,9 +473,9 @@ def train_single_model(args, skip_pattern: int):
         print("No data loaded. Check landmarks directory.")
         return None
 
-    # Split data: 70% train, 15% val, 15% test
+    # Split data: 80% train, 10% val, 10% test
     X_train, X_temp, y_train, y_temp = train_test_split(
-        sequences, labels, test_size=0.3, random_state=42, stratify=labels
+        sequences, labels, test_size=0.2, random_state=42, stratify=labels
     )
     X_val, X_test, y_val, y_test = train_test_split(
         X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
@@ -438,9 +500,20 @@ def train_single_model(args, skip_pattern: int):
         ),
     }
 
-    model = GestureRecognizerModel(
-        feature_info["total_features"], len(class_names), args.hidden_size, args.dropout
-    )
+    if model_type == "lstm":
+        model = GestureRecognizerLSTM(
+            feature_info["total_features"],
+            len(class_names),
+            args.hidden_size,
+            args.dropout,
+        )
+    else:
+        model = GestureRecognizerCNN(
+            feature_info["total_features"],
+            len(class_names),
+            args.hidden_size,
+            args.dropout,
+        )
 
     trainer = ModelTrainer(model)
     trainer.train(
@@ -451,13 +524,20 @@ def train_single_model(args, skip_pattern: int):
         model_path,
         model_dir,
         skip_pattern,
+        model_type,
     )
 
     # Load best model and evaluate
     checkpoint = torch.load(model_path)
     model.load_state_dict(checkpoint["model_state_dict"])
     evaluate_model(
-        model, loaders["test"], class_names, trainer.device, model_dir, skip_pattern
+        model,
+        loaders["test"],
+        class_names,
+        trainer.device,
+        model_dir,
+        skip_pattern,
+        model_type,
     )
 
     # Save metadata (format preserved for compatibility)
@@ -489,12 +569,15 @@ def main():
     parser.add_argument("--hidden_size", type=int, default=DEFAULT_HIDDEN_SIZE)
     parser.add_argument("--dropout", type=float, default=DEFAULT_DROPOUT)
     parser.add_argument("--skip_patterns", nargs="+", type=int, default=[0, 1, 2])
+    parser.add_argument(
+        "--model_type", type=str, default="lstm", choices=["cnn", "lstm"]
+    )
     args = parser.parse_args()
 
     model_infos = {}
     for skip_pattern in args.skip_patterns:
         if skip_pattern in [0, 1, 2]:
-            model_info = train_single_model(args, skip_pattern)
+            model_info = train_single_model(args, skip_pattern, args.model_type)
             if model_info:
                 model_infos[skip_pattern] = model_info
 

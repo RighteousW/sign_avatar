@@ -45,6 +45,7 @@ src/landmark_extraction/landmark_extraction.py
 src/model_training/__init__.py
 src/model_training/demo_sentences.py
 src/model_training/gesture_recognizer.py
+src/model_training/gesture_recognizer_lstm.py
 src/model_training/gloss2text.py
 src/video2gloss/__init__.py
 src/video2gloss/inference_example.py

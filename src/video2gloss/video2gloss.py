@@ -5,7 +5,7 @@ import numpy as np
 from collections import deque
 from typing import List, Optional, Tuple
 
-from ..model_training import GestureRecognizerModel
+from ..model_training import GestureRecognizerCNN
 
 from ..constants import (
     get_gesture_metadata_path,
@@ -81,7 +81,7 @@ class GestureRecognizer:
             self.model_info = pickle.load(f)
 
         # Initialize model
-        self.model = GestureRecognizerModel(
+        self.model = GestureRecognizerCNN(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],

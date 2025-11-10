@@ -17,7 +17,7 @@ from ..constants import (
     get_gesture_model_path,
 )
 
-from ..model_training import GestureRecognizerModel
+from ..model_training import GestureRecognizerCNN
 
 
 class PerformanceMeasurementSystem:
@@ -47,7 +47,7 @@ class PerformanceMeasurementSystem:
             self.model_info = pickle.load(f)
 
         # Load model
-        self.model = GestureRecognizerModel(
+        self.model = GestureRecognizerCNN(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],

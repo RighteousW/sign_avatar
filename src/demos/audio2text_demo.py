@@ -7,7 +7,6 @@ import sys
 import threading
 import numpy as np
 import sounddevice as sd
-import speech_recognition as sr
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -15,14 +14,16 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QLabel,
     QTextEdit,
+    QPushButton,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QKeyEvent
 
 try:
-    from demo_utils import get_dark_stylesheet
-except ImportError:
     from .demo_utils import get_dark_stylesheet
+    from ..audio2gloss import AudioToGlossConverter
+except ImportError:
+    print("Import error - ensure modules are available")
 
 
 class AudioRecorder(QObject):
@@ -82,11 +83,14 @@ class Audio2TextWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.recorder = AudioRecorder()
-        self.recognizer = sr.Recognizer()
+        self.audio_converter = (
+            AudioToGlossConverter()
+        )
         self.is_recording = False
 
         self.setup_ui()
         self.setup_connections()
+        self.load_converter()
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -97,7 +101,7 @@ class Audio2TextWidget(QWidget):
         layout.addWidget(title)
 
         # Status
-        self.status_label = QLabel("Ready - Press SPACE to record")
+        self.status_label = QLabel("Loading...")
         self.status_label.setStyleSheet("font-size: 14px; padding: 5px;")
         layout.addWidget(self.status_label)
 
@@ -107,6 +111,12 @@ class Audio2TextWidget(QWidget):
         )
         instructions.setStyleSheet("font-size: 12px; color: #888; padding: 5px;")
         layout.addWidget(instructions)
+
+        # Recording button (for tab compatibility)
+        self.record_btn = QPushButton("Start Recording (or hold SPACE)")
+        self.record_btn.pressed.connect(self.start_recording)
+        self.record_btn.released.connect(self.stop_recording)
+        layout.addWidget(self.record_btn)
 
         # Transcribed text output
         layout.addWidget(QLabel("Transcribed Text:"))
@@ -123,6 +133,20 @@ class Audio2TextWidget(QWidget):
         self.recorder.error_occurred.connect(self.on_error)
         self.update_text_signal.connect(self.text_output.setText)
         self.update_status_signal.connect(self.status_label.setText)
+
+    def load_converter(self):
+        """Load the audio converter model"""
+        thread = threading.Thread(target=self._load_converter)
+        thread.daemon = True
+        thread.start()
+
+    def _load_converter(self):
+        if self.audio_converter.load_model():
+            self.update_status_signal.emit("✓ Ready - Press SPACE to record")
+        else:
+            self.update_status_signal.emit(
+                "⚠ Error: Run 'python3 -m spacy download en_core_web_sm'"
+            )
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
@@ -157,34 +181,37 @@ class Audio2TextWidget(QWidget):
             # Clean audio data
             audio_array = np.nan_to_num(audio_array, nan=0.0, posinf=0.0, neginf=0.0)
 
-            # Convert to 16-bit PCM
-            audio_int16 = (audio_array * 32767).astype(np.int16)
-
-            # Create AudioData object
-            audio_data = sr.AudioData(
-                audio_int16.tobytes(), sample_rate, sample_width=2
+            # Use AudioToGlossConverter's robust transcription
+            text, clause_glosses = self.audio_converter.numpy_to_glosses(
+                audio_array, sample_rate
             )
-
-            # Transcribe
-            text = self.recognizer.recognize_google(audio_data)
 
             self.update_text_signal.emit(text)
             self.update_status_signal.emit(
                 "✓ Transcription complete - Press SPACE to record again"
             )
 
-        except sr.UnknownValueError:
-            self.update_text_signal.emit("[Could not understand audio]")
-            self.update_status_signal.emit("⚠ Could not understand audio - Try again")
-        except sr.RequestError as e:
-            self.update_text_signal.emit(f"[API Error: {str(e)}]")
-            self.update_status_signal.emit("⚠ Recognition service error")
         except Exception as e:
-            self.update_text_signal.emit(f"[Error: {str(e)}]")
-            self.update_status_signal.emit(f"⚠ Error: {str(e)}")
+            error_msg = str(e)
+            if "Could not understand" in error_msg or "UnknownValueError" in error_msg:
+                self.update_text_signal.emit("[Could not understand audio]")
+                self.update_status_signal.emit(
+                    "⚠ Could not understand audio - Try again"
+                )
+            elif "RequestError" in error_msg:
+                self.update_text_signal.emit(f"[API Error: {error_msg}]")
+                self.update_status_signal.emit("⚠ Recognition service error")
+            else:
+                self.update_text_signal.emit(f"[Error: {error_msg}]")
+                self.update_status_signal.emit(f"⚠ Error: {error_msg}")
 
     def on_error(self, error_msg):
         self.update_status_signal.emit(f"⚠ {error_msg}")
+
+    def showEvent(self, event):
+        """Called when tab becomes visible - ensure we have focus for keyboard events"""
+        super().showEvent(event)
+        self.setFocus()
 
 
 class MainWindow(QMainWindow):

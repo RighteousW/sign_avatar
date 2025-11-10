@@ -48,6 +48,7 @@ def get_dark_stylesheet():
         QLabel {
             color: #e0e0e0;
             font-size: 13px;
+            padding: 2px;
         }
         QRadioButton {
             color: #e0e0e0;
@@ -76,9 +77,12 @@ class LandmarkCanvas(QWidget):
     def __init__(self):
         super().__init__()
         self.landmarks_data = None
+        self.landmarks = None  # Alias for compatibility
         self.current_frame_idx = 0
+        self.paused_frame_idx = 0
         self.total_frames = 0
-        self.setMinimumHeight(400)
+        self.is_animating = False
+        self.setMinimumHeight(200)
         self.setStyleSheet("background-color: black;")
 
         # MediaPipe connections
@@ -97,6 +101,7 @@ class LandmarkCanvas(QWidget):
         try:
             with open(filepath, "rb") as f:
                 self.landmarks_data = pickle.load(f)
+                self.landmarks = self.landmarks_data  # Alias for compatibility
 
             import os
 
@@ -114,11 +119,14 @@ class LandmarkCanvas(QWidget):
                 self.total_frames = 0
 
             self.current_frame_idx = 0
+            self.paused_frame_idx = 0
+            self.is_animating = True
             self.timer.start(33)  # ~30 fps
             self.status_text = f"Playing ({self.total_frames} frames)"
             self.update()
         except Exception as e:
             self.status_text = f"Error: {str(e)}"
+            self.is_animating = False
             self.update()
 
     def next_frame(self):
@@ -127,12 +135,41 @@ class LandmarkCanvas(QWidget):
             self.update()
         else:
             self.timer.stop()
+            self.is_animating = False
+
+    def pause_animation(self):
+        """Pause the animation"""
+        if self.timer.isActive():
+            self.paused_frame_idx = self.current_frame_idx
+            self.timer.stop()
+            self.is_animating = False
+            self.status_text = (
+                f"Paused at frame {self.current_frame_idx + 1}/{self.total_frames}"
+            )
+            self.update()
+
+    def resume_animation(self):
+        """Resume the animation from paused position"""
+        if (
+            not self.timer.isActive()
+            and self.landmarks_data is not None
+            and self.total_frames > 0
+        ):
+            self.current_frame_idx = self.paused_frame_idx
+            self.timer.start(33)  # 30 FPS
+            self.is_animating = True
+            self.status_text = f"Playing ({self.total_frames} frames)"
+            self.update()
 
     def stop_animation(self):
+        """Stop the animation and reset"""
         self.timer.stop()
         self.landmarks_data = None
+        self.landmarks = None
         self.current_frame_idx = 0
+        self.paused_frame_idx = 0
         self.total_frames = 0
+        self.is_animating = False
         self.status_text = "Ready"
         self.update()
 
@@ -217,9 +254,12 @@ class LandmarkCanvas(QWidget):
         painter.drawPixmap(0, 0, self.width(), self.height(), pixmap)
 
         painter.setPen(QColor(255, 255, 255))
-        painter.drawText(
-            10, 25, f"Frame: {self.current_frame_idx + 1}/{self.total_frames}"
+        status_display = (
+            self.status_text
+            if not self.is_animating
+            else f"Frame: {self.current_frame_idx + 1}/{self.total_frames}"
         )
+        painter.drawText(10, 25, status_display)
 
 
 class VideoDisplayLabel(QLabel):
@@ -227,7 +267,7 @@ class VideoDisplayLabel(QLabel):
 
     def __init__(self, text=""):
         super().__init__(text)
-        self.setMinimumHeight(400)
+        self.setMinimumHeight(200)
         self.setStyleSheet("background-color: black; color: gray;")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setScaledContents(False)

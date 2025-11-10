@@ -592,15 +592,14 @@ def evaluate(model, dataloader, gloss_vocab, text_vocab, device):
 gloss2text_translate_sentence = translate_sentence
 load_gloss2text_full_model = load_full_model
 
-
-if __name__ == "__main__":
+def main():
     # Set seed for reproducibility
     set_seed(42)
 
     # Config
-    PRIMARY_DATA_PATH = "data/dataset/synthetic/synthetic_MediTOD.csv"
+    PRIMARY_DATA_PATH = "data/dataset/synthetic/synthetic_NSL_gesture_vocab.csv"
     SUPPLEMENTARY_PATHS = [
-        "data/dataset/synthetic/synthetic_NSL_gesture_vocab.csv",
+        "data/dataset/synthetic/synthetic_MediTOD.csv",
     ]
     SAMPLES_PER_SUPPLEMENTARY = (
         10000  # Number of samples to draw from each supplementary dataset
@@ -619,7 +618,7 @@ if __name__ == "__main__":
 
     # Create timestamped save directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"{str(GLOSS2TEXT_LOGS)}/synthetic_MediTOD+gesture_vocab_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
+    save_dir = f"{str(GLOSS2TEXT_LOGS)}/synthetic_gesture_vocab+synthetic_MediTOD_batch-size{BATCH_SIZE}_hidden-size{HIDDEN_SIZE}_epochs{NUM_EPOCHS}_timestamp{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
     print(f"Save directory: {save_dir}\n")
 
@@ -847,3 +846,6 @@ if __name__ == "__main__":
 
     print("=" * 60)
     print(f"\nExamples saved to: {examples_path}")
+
+if __name__ == "__main__":
+    main()

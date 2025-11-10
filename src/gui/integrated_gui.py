@@ -47,7 +47,7 @@ try:
         FRAME_HEIGHT,
     )
     from ..utils.interpolation import apply_frame_skipping
-    from ..model_training import GestureRecognizerModel
+    from ..model_training import GestureRecognizerCNN
     from ..landmark_extraction import LandmarkExtractor
     from ..data_creation.video_recording import VideoRecorder, FrameTimer
     import mediapipe as mp
@@ -501,7 +501,7 @@ class VideoProcessor(QObject):
         with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.model_info = pickle.load(f)
 
-        self.model = GestureRecognizerModel(
+        self.model = GestureRecognizerCNN(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],

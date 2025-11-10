@@ -30,7 +30,7 @@ try:
         get_gesture_metadata_path,
         get_gesture_model_path,
     )
-    from ..model_training import GestureRecognizerModel
+    from ..model_training import GestureRecognizerCNN
     from ..landmark_extraction import LandmarkExtractor
 except ImportError:
     print("Import error: Ensure required modules are available")
@@ -53,7 +53,7 @@ class VideoFileProcessor(QObject):
         with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.model_info = pickle.load(f)
 
-        self.model = GestureRecognizerModel(
+        self.model = GestureRecognizerCNN(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],

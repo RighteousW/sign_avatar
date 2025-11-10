@@ -29,7 +29,7 @@ try:
         get_gesture_model_path,
         REPRESENTATIVES_LEFT,
     )
-    from ..model_training import GestureRecognizerModel
+    from ..model_training import GestureRecognizerCNN
     from ..landmark_extraction import LandmarkExtractor
     from ..gloss2audio import Gloss2Text
     from ..audio2gloss import AudioToGlossConverter
@@ -65,7 +65,7 @@ class EndToEndMeasurement:
         with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
             self.gesture_model_info = pickle.load(f)
 
-        self.gesture_model = GestureRecognizerModel(
+        self.gesture_model = GestureRecognizerCNN(
             input_size=self.gesture_model_info["input_size"],
             num_classes=len(self.gesture_model_info["class_names"]),
             hidden_size=self.gesture_model_info["hidden_size"],

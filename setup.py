@@ -67,9 +67,10 @@ setup(
         "console_scripts": [
             # demos
             # integrated one
+            "unified-demo=src.demos.unified_demo:main",
             "integrated-demo=src.demos.integrated_demo:main",
             
-            #audio2visualization pipeline
+            # audio2visualization pipeline
             "audio2text-demo=src.demos.audio2text_demo:main",
             "text2gloss-demo=src.demos.text2gloss_demo:main",
             "gloss2visualization-demo=src.demos.gloss2visualization_demo:main",
@@ -79,6 +80,13 @@ setup(
             "video2gloss-record-demo=src.demos.video2gloss_record_demo:main",
             "gloss2text-demo=src.demos.gloss2text_demo:main",
             "text2speech-demo=src.demos.text2speech_demo:main",
+            
+            # training scripts
+            "train-gesture-recognizer=src.model_training.gesture_recognizer:main",
+            "train-gloss2text=src.model_training.gloss2text:main",
+            
+            # others
+            "video_recording=src.data_creation.video_recording:main",
         ],
     },
 )

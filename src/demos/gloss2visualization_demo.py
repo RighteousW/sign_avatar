@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -40,6 +41,7 @@ class Gloss2VisualizationWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.generator = GestureTransitionGenerator(REPRESENTATIVES_MANUAL)
+        self.current_landmark_file = None
         self.setup_ui()
         self.setup_connections()
 
@@ -58,7 +60,23 @@ class Gloss2VisualizationWidget(QWidget):
 
         # Visualization canvas
         self.canvas = LandmarkCanvas()
-        layout.addWidget(self.canvas, 60)
+        layout.addWidget(self.canvas, 50)
+
+        # Playback controls
+        controls_layout = QHBoxLayout()
+
+        self.play_pause_btn = QPushButton("⏸ Pause")
+        self.play_pause_btn.clicked.connect(self.toggle_play_pause)
+        self.play_pause_btn.setEnabled(False)
+        controls_layout.addWidget(self.play_pause_btn)
+
+        self.restart_btn = QPushButton("⏮ Restart")
+        self.restart_btn.clicked.connect(self.restart_animation)
+        self.restart_btn.setEnabled(False)
+        controls_layout.addWidget(self.restart_btn)
+
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
 
         # Input glosses
         layout.addWidget(QLabel("Input Glosses (space-separated):"))
@@ -81,8 +99,26 @@ class Gloss2VisualizationWidget(QWidget):
         self.setLayout(layout)
 
     def setup_connections(self):
-        self.visualize_signal.connect(self.canvas.load_landmarks)
+        self.visualize_signal.connect(self.on_visualization_ready)
         self.update_status_signal.connect(self.status_label.setText)
+
+    def toggle_play_pause(self):
+        """Toggle between play and pause"""
+        if self.canvas.is_animating:
+            self.canvas.pause_animation()
+            self.play_pause_btn.setText("▶ Play")
+            self.update_status_signal.emit("⏸ Paused")
+        else:
+            self.canvas.resume_animation()
+            self.play_pause_btn.setText("⏸ Pause")
+            self.update_status_signal.emit("▶ Playing")
+
+    def restart_animation(self):
+        """Restart animation from the beginning"""
+        if self.current_landmark_file and os.path.exists(self.current_landmark_file):
+            self.canvas.load_landmarks(self.current_landmark_file)
+            self.play_pause_btn.setText("⏸ Pause")
+            self.update_status_signal.emit("⏮ Restarted - Playing")
 
     def generate_visualization(self):
         gloss_text = self.gloss_input.text().strip()
@@ -95,6 +131,8 @@ class Gloss2VisualizationWidget(QWidget):
             f"Generating visualization for {len(glosses)} glosses..."
         )
         self.visualize_btn.setEnabled(False)
+        self.play_pause_btn.setEnabled(False)
+        self.restart_btn.setEnabled(False)
         self.canvas.stop_animation()
 
         thread = threading.Thread(target=self._generate_visualization, args=(glosses,))
@@ -114,12 +152,42 @@ class Gloss2VisualizationWidget(QWidget):
             else:
                 self.update_status_signal.emit("✓ Playing visualization")
 
+            self.current_landmark_file = landmark_file
             self.visualize_signal.emit(landmark_file)
 
         except Exception as e:
             self.update_status_signal.emit(f"⚠ Visualization error: {str(e)}")
 
         self.visualize_btn.setEnabled(True)
+
+    def on_visualization_ready(self, landmark_file):
+        """Called when visualization is ready to play"""
+        self.canvas.load_landmarks(landmark_file)
+        self.play_pause_btn.setEnabled(True)
+        self.play_pause_btn.setText("⏸ Pause")
+        self.restart_btn.setEnabled(True)
+
+    def showEvent(self, event):
+        """Called when tab becomes visible - resume animation if paused"""
+        super().showEvent(event)
+        if self.canvas.is_animating:
+            # Already playing, do nothing
+            pass
+        elif (
+            self.current_landmark_file
+            and hasattr(self.canvas, "landmarks")
+            and self.canvas.landmarks
+        ):
+            # Was paused, resume
+            self.canvas.resume_animation()
+            self.play_pause_btn.setText("⏸ Pause")
+
+    def hideEvent(self, event):
+        """Called when tab is hidden - pause animation"""
+        super().hideEvent(event)
+        if self.canvas.is_animating:
+            self.canvas.pause_animation()
+            self.play_pause_btn.setText("▶ Play")
 
 
 class MainWindow(QMainWindow):

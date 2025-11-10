@@ -1,5 +1,5 @@
 """
-Webcam to Gloss GUI
+Webcam to Gloss demo
 Live webcam feed with real-time gloss detection
 """
 
@@ -406,7 +406,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 700, 700)
 
         try:
-            from .styles import get_dark_stylesheet
+            from .demo_utils import get_dark_stylesheet
 
             self.setStyleSheet(get_dark_stylesheet())
         except ImportError:
