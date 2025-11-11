@@ -60,7 +60,7 @@ class Gloss2TextWidget(QWidget):
         # Input glosses
         layout.addWidget(QLabel("Input Glosses (space-separated):"))
         self.gloss_input = QLineEdit()
-        self.gloss_input.setPlaceholderText("e.g., hello my name john")
+        self.gloss_input.setPlaceholderText("e.g., YOU DOCTOR WITH COME")
         layout.addWidget(self.gloss_input)
 
         # Translate button
@@ -78,7 +78,7 @@ class Gloss2TextWidget(QWidget):
 
         # Instructions
         instructions = QLabel(
-            "Enter glosses in uppercase or lowercase, separated by spaces."
+            "Enter glosses in uppercase, separated by spaces."
         )
         instructions.setStyleSheet("font-size: 11px; color: #888; padding: 5px;")
         layout.addWidget(instructions)

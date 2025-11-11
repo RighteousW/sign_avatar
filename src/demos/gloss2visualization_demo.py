@@ -81,7 +81,7 @@ class Gloss2VisualizationWidget(QWidget):
         # Input glosses
         layout.addWidget(QLabel("Input Glosses (space-separated):"))
         self.gloss_input = QLineEdit()
-        self.gloss_input.setPlaceholderText("e.g., hello my name john")
+        self.gloss_input.setPlaceholderText("e.g., SICK WOMAN VOMIT")
         layout.addWidget(self.gloss_input)
 
         # Visualize button
@@ -91,7 +91,7 @@ class Gloss2VisualizationWidget(QWidget):
 
         # Instructions
         instructions = QLabel(
-            "Enter glosses separated by spaces. Available glosses depend on your trained models."
+            "Enter glosses in uppercase separated by spaces. Available glosses depend on your trained models."
         )
         instructions.setStyleSheet("font-size: 11px; color: #888; padding: 5px;")
         layout.addWidget(instructions)

@@ -9,10 +9,8 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
     QLabel,
     QTabWidget,
-    QComboBox,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -22,8 +20,6 @@ try:
     from .text2gloss_demo import Text2GlossWidget
     from .gloss2visualization_demo import Gloss2VisualizationWidget
     from .video2gloss_webcam_demo import Webcam2GlossWidget
-    from .video2gloss_record_demo import Video2GlossRecordWidget
-    from .video2gloss_file_demo import Video2GlossFileWidget
     from .gloss2text_demo import Gloss2TextWidget
     from .text2speech_demo import Text2SpeechWidget
 except ImportError:
@@ -33,8 +29,6 @@ except ImportError:
         from .text2gloss_demo import Text2GlossWidget
         from .gloss2visualization_demo import Gloss2VisualizationWidget
         from .video2gloss_webcam_demo import Webcam2GlossWidget
-        from .video2gloss_record_demo import Video2GlossRecordWidget
-        from .video2gloss_file_demo import Video2GlossFileWidget
         from .gloss2text_demo import Gloss2TextWidget
         from .text2speech_demo import Text2SpeechWidget
     except ImportError:
@@ -42,7 +36,7 @@ except ImportError:
 
 
 class Video2GlossTabWidget(QWidget):
-    """Video2Gloss tab with mode selection dropdown"""
+    """Video2Gloss tab with live webcam"""
 
     glosses_detected_signal = pyqtSignal(
         list
@@ -57,59 +51,15 @@ class Video2GlossTabWidget(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout()
 
-        # Mode selection
-        mode_layout = QHBoxLayout()
-        mode_layout.addWidget(QLabel("Mode:"))
+        # Directly add webcam widget
+        self.current_widget = Webcam2GlossWidget()
 
-        self.mode_selector = QComboBox()
-        self.mode_selector.addItems(
-            ["Webcam (Live)", "Record from Webcam", "Upload Video File"]
-        )
-        self.mode_selector.currentIndexChanged.connect(self.change_mode)
-        mode_layout.addWidget(self.mode_selector)
-        mode_layout.addStretch()
+        # Connect gloss detection signal
+        if hasattr(self.current_widget.processor, "gloss_detected"):
+            self.current_widget.processor.gloss_detected.connect(self.on_gloss_detected)
 
-        layout.addLayout(mode_layout)
-
-        # Container for mode widgets
-        self.widget_container = QVBoxLayout()
-        layout.addLayout(self.widget_container)
-
+        layout.addWidget(self.current_widget)
         self.setLayout(layout)
-
-        # Initialize with webcam mode
-        self.change_mode(0)
-
-    def change_mode(self, index):
-        """Switch between video2gloss modes"""
-        # Clear existing widget
-        if self.current_widget:
-            self.widget_container.removeWidget(self.current_widget)
-            self.current_widget.setParent(None)
-            self.current_widget = None
-
-        # Create new widget based on mode
-        if index == 0:  # Webcam
-            self.current_widget = Webcam2GlossWidget()
-            # Connect gloss detection signal
-            if hasattr(self.current_widget.processor, "gloss_detected"):
-                self.current_widget.processor.gloss_detected.connect(
-                    self.on_gloss_detected
-                )
-        elif index == 1:  # Record
-            self.current_widget = Video2GlossRecordWidget()
-            if hasattr(self.current_widget.processor, "gloss_detected"):
-                self.current_widget.processor.gloss_detected.connect(
-                    self.on_gloss_detected
-                )
-        else:  # File
-            self.current_widget = Video2GlossFileWidget()
-            if hasattr(self.current_widget.processor, "gloss_detected"):
-                self.current_widget.processor.gloss_detected.connect(
-                    self.on_gloss_detected
-                )
-
-        self.widget_container.addWidget(self.current_widget)
 
     def on_gloss_detected(self, gloss, confidence):
         """Collect detected glosses to share with other tabs"""

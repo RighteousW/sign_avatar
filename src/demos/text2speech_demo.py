@@ -61,7 +61,6 @@ class Text2SpeechWidget(QWidget):
         # Instructions
         instructions = QLabel(
             "Text will be converted to speech using Google TTS. "
-            "Requires 'gtts' and audio player (mpg123/afplay/default player)."
         )
         instructions.setStyleSheet("font-size: 11px; color: #888; padding: 5px;")
         instructions.setWordWrap(True)

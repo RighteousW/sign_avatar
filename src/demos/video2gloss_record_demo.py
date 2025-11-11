@@ -66,8 +66,11 @@ class VideoRecordingProcessor(QObject):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.confidence_threshold = 0.7
 
+        use_pose = True
+        skip_pattern = 2
+
         # Load model
-        with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
+        with open(str(get_gesture_metadata_path(use_pose, skip_pattern)), "rb") as f:
             self.model_info = pickle.load(f)
 
         self.model = GestureRecognizerCNN(
@@ -78,7 +81,8 @@ class VideoRecordingProcessor(QObject):
         )
 
         checkpoint = torch.load(
-            str(get_gesture_model_path(False, 2)), map_location=self.device
+            str(get_gesture_model_path(use_pose, skip_pattern)),
+            map_location=self.device,
         )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
