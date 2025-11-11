@@ -53,7 +53,10 @@ pip install -r requirements.txt
 Run the unified demo application:
 
 ```bash
-python unified_demo.py
+#install command scripts using setup.py
+pip install -e .
+
+unified-demo
 ```
 
 The application provides a tabbed interface with all six components accessible from a single window.
