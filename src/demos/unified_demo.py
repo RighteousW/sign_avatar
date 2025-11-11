@@ -80,7 +80,7 @@ class UnifiedDemoWidget(QWidget):
         layout = QVBoxLayout()
 
         # Title
-        title = QLabel("Sign Language Translation System")
+        title = QLabel("NSL Sign Avatar")
         title.setStyleSheet("font-size: 20px; font-weight: bold; padding: 10px;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
