@@ -37,6 +37,8 @@ This honors project implements a complete pipeline for sign language translation
    - Text-to-speech synthesis
    - Completes the bidirectional translation loop
 
+Note that ```Speech → Text``` and ``Text → Speech`` modules require internet connection to work
+
 ## Installation
 
 ```bash
