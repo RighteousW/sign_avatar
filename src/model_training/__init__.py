@@ -1,5 +1,5 @@
 from .gesture_recognizer import (
-    GestureRecognizerCNN, GestureRecognizerLSTM,
+    GestureRecognizerCNN, GestureRecognizerLSTM, GestureRecognizerScaleCNN
 )
 from .gloss2text import (
     load_full_model as load_gloss2text_full_model,
@@ -14,6 +14,7 @@ from .gloss2text import (
 __all__ = [
     "GestureRecognizerCNN",
     "GestureRecognizerLSTM",
+    "GestureRecognizerScaleCNN",
     "load_gloss2text_full_model",
     "gloss2text_translate_sentence",
     "load_data_from_file",

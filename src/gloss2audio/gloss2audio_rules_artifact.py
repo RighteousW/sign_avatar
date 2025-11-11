@@ -286,7 +286,10 @@ class Gloss2Voice:
         return {k: np.mean(v) for k, v in bleu_scores.items()}
 
     def evaluate_on_aslg(
-        self, csv_path="data/ASLG-PC12 dataset/train.csv", max_samples=1000, verbose=True
+        self,
+        csv_path="data/dataset/synthetic/synthetic_ASLG-PC12.csv",
+        max_samples=1000,
+        verbose=True,
     ):
         """
         Evaluate on ASLG-PC12 dataset

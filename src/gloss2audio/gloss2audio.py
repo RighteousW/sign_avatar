@@ -1,3 +1,4 @@
+from src.gloss2audio.gloss2text_rules import GlossToTextConverter
 from ..model_training import load_gloss2text_full_model, gloss2text_translate_sentence
 from gtts import gTTS
 
@@ -14,6 +15,17 @@ class Gloss2Text:
         translation = gloss2text_translate_sentence(
             self.model, gloss_sequence, self.gloss_vocab, self.text_vocab, self.device
         )
+        return translation
+
+
+class Gloss2Text_rules:
+    def __init__(self):
+        self.converter = GlossToTextConverter()
+        self.converter.load_model()
+        pass
+
+    def infer(self, gloss_sequence: list[str]) -> list[str]:
+        translation = self.converter.glosses_to_text([gloss_sequence])
         return translation
 
 

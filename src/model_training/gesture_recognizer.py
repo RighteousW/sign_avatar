@@ -283,6 +283,116 @@ class GestureRecognizerCNN(nn.Module):
         return self.classifier(x)
 
 
+class GestureRecognizerScaleCNN(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        num_classes: int,
+        hidden_size: int = 256,
+        dropout: float = 0.3,
+    ):
+        super().__init__()
+
+        # 5 different temporal scales for capturing variations
+        # Scale 1: Single frame - instantaneous pose
+        self.conv_tiny = nn.Sequential(
+            nn.Conv1d(input_size, hidden_size, kernel_size=1),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+        )
+
+        # Scale 2: 3 frames - very fast micro-movements
+        self.conv_small = nn.Sequential(
+            nn.Conv1d(input_size, hidden_size, kernel_size=3, padding=1),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+        )
+
+        # Scale 3: 5 frames - fast hand transitions
+        self.conv_medium = nn.Sequential(
+            nn.Conv1d(input_size, hidden_size, kernel_size=5, padding=2),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+        )
+
+        # Scale 4: 7 frames - medium gesture phases
+        self.conv_large = nn.Sequential(
+            nn.Conv1d(input_size, hidden_size, kernel_size=7, padding=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+        )
+
+        # Scale 5: 11 frames - slow, full gesture context
+        self.conv_xlarge = nn.Sequential(
+            nn.Conv1d(input_size, hidden_size, kernel_size=11, padding=5),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+        )
+
+        # Combine all 5 scales (5 * hidden_size channels)
+        self.fusion = nn.Sequential(
+            nn.Conv1d(hidden_size * 5, hidden_size * 2, kernel_size=1),
+            nn.BatchNorm1d(hidden_size * 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(hidden_size * 2, hidden_size, kernel_size=3, padding=1),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+        # Temporal attention mechanism
+        self.attention = nn.Sequential(
+            nn.Conv1d(hidden_size, hidden_size // 4, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv1d(hidden_size // 4, hidden_size, kernel_size=1),
+            nn.Sigmoid(),
+        )
+
+        # Dual pooling for robustness
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        self.global_max_pool = nn.AdaptiveMaxPool1d(1)
+
+        # Final classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(hidden_size * 2, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout + 0.1),
+            nn.Linear(hidden_size, num_classes),
+        )
+
+    def forward(self, x):
+        # x shape: (batch, sequence_length, input_size)
+        x = x.transpose(1, 2)  # -> (batch, input_size, sequence_length)
+
+        # Extract features at all 5 temporal scales
+        feat_tiny = self.conv_tiny(x)  # Instantaneous pose
+        feat_small = self.conv_small(x)  # Very fast movements
+        feat_medium = self.conv_medium(x)  # Fast transitions
+        feat_large = self.conv_large(x)  # Medium phases
+        feat_xlarge = self.conv_xlarge(x)  # Full gesture context
+
+        # Concatenate all scales along channel dimension
+        x = torch.cat(
+            [feat_tiny, feat_small, feat_medium, feat_large, feat_xlarge], dim=1
+        )
+
+        # Fuse multi-scale features
+        x = self.fusion(x)
+
+        # Apply attention to focus on important temporal regions
+        attention_weights = self.attention(x)
+        x = x * attention_weights
+
+        # Dual pooling (captures both average and peak activations)
+        avg_pool = self.global_pool(x).squeeze(-1)
+        max_pool = self.global_max_pool(x).squeeze(-1)
+        x = torch.cat([avg_pool, max_pool], dim=1)
+
+        # Classification
+        return self.classifier(x)
+
+
 class ModelTrainer:
     def __init__(
         self,
@@ -570,7 +680,7 @@ def main():
     parser.add_argument("--dropout", type=float, default=DEFAULT_DROPOUT)
     parser.add_argument("--skip_patterns", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument(
-        "--model_type", type=str, default="lstm", choices=["cnn", "lstm"]
+        "--model_type", type=str, default="scale_cnn", choices=["cnn", "scale_cnn", "lstm"]
     )
     args = parser.parse_args()
 

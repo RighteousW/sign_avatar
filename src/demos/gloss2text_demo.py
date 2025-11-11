@@ -20,11 +20,11 @@ from PyQt6.QtCore import pyqtSignal
 
 try:
     from demo_utils import get_dark_stylesheet
-    from ..gloss2audio import Gloss2Text
+    from ..gloss2audio import Gloss2Text, Gloss2Text_rules
 except ImportError:
     try:
         from .demo_utils import get_dark_stylesheet
-        from ..gloss2audio import Gloss2Text
+        from ..gloss2audio import Gloss2Text, Gloss2Text_rules
     except ImportError:
         print("Import error - ensure modules are available")
 

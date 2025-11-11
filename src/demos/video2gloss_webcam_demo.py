@@ -26,8 +26,6 @@ from PyQt6.QtGui import QImage, QPixmap
 
 try:
     from ..constants import (
-        MEDIAPIPE_HAND_LANDMARKER_PATH,
-        MEDIAPIPE_POSE_LANDMARKER_PATH,
         get_gesture_metadata_path,
         get_gesture_model_path,
     )

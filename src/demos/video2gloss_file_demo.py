@@ -23,17 +23,18 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
 
+
 try:
     from demo_utils import get_dark_stylesheet, VideoDisplayLabel
     from ..constants import get_gesture_metadata_path, get_gesture_model_path
-    from ..model_training import GestureRecognizerCNN
+    from ..model_training import GestureRecognizerCNN, GestureRecognizerScaleCNN
     from ..landmark_extraction import LandmarkExtractor
     from ..utils.interpolation import apply_frame_skipping
 except ImportError:
     try:
         from .demo_utils import get_dark_stylesheet, VideoDisplayLabel
         from ..constants import get_gesture_metadata_path, get_gesture_model_path
-        from ..model_training import GestureRecognizerCNN
+        from ..model_training import GestureRecognizerCNN, GestureRecognizerScaleCNN
         from ..landmark_extraction import LandmarkExtractor
         from ..utils.interpolation import apply_frame_skipping
     except ImportError:
