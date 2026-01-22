@@ -45,7 +45,7 @@ class VideoRecorder:
     def __init__(self, word):
         self.word = word
         self.video_writer = None
-        self.video_writer_flipped = None
+        # self.video_writer_flipped = None
         self.video_path = None
         self.video_path_flipped = None
         self.frame_count = 0
@@ -76,17 +76,17 @@ class VideoRecorder:
         )
 
         # Flipped video writer
-        self.video_writer_flipped = cv2.VideoWriter(
-            self.video_path_flipped, fourcc, fps, (width, height)
-        )
+        # self.video_writer_flipped = cv2.VideoWriter(
+        #     self.video_path_flipped, fourcc, fps, (width, height)
+        # )
 
         if not self.video_writer.isOpened():
             raise Exception(f"Could not open video writer for {self.video_path}")
 
-        if not self.video_writer_flipped.isOpened():
-            raise Exception(
-                f"Could not open video writer for {self.video_path_flipped}"
-            )
+        # if not self.video_writer_flipped.isOpened():
+        #     raise Exception(
+        #         f"Could not open video writer for {self.video_path_flipped}"
+        #     )
 
         self.frame_count = 0
         print(f"Started recording:")
@@ -95,13 +95,13 @@ class VideoRecorder:
 
     def add_frame(self, frame):
         """Add a frame to both original and flipped videos."""
-        if self.video_writer is not None and self.video_writer_flipped is not None:
+        if self.video_writer is not None:
             # Write original frame
             self.video_writer.write(frame)
 
             # Write horizontally flipped frame
-            flipped_frame = cv2.flip(frame, 1)  # 1 = horizontal flip
-            self.video_writer_flipped.write(flipped_frame)
+            # flipped_frame = cv2.flip(frame, 1)  # 1 = horizontal flip
+            # self.video_writer_flipped.write(flipped_frame)
 
             self.frame_count += 1
 
@@ -115,11 +115,11 @@ class VideoRecorder:
             saved_paths.append(self.video_path)
             print(f"Original video saved: {os.path.basename(self.video_path)}")
 
-        if self.video_writer_flipped is not None:
-            self.video_writer_flipped.release()
-            self.video_writer_flipped = None
-            saved_paths.append(self.video_path_flipped)
-            print(f"Flipped video saved:  {os.path.basename(self.video_path_flipped)}")
+        # if self.video_writer_flipped is not None:
+        #     self.video_writer_flipped.release()
+        #     self.video_writer_flipped = None
+        #     saved_paths.append(self.video_path_flipped)
+        #     print(f"Flipped video saved:  {os.path.basename(self.video_path_flipped)}")
 
         if saved_paths:
             print(f"Total frames recorded: {self.frame_count}")
@@ -279,7 +279,7 @@ def main():
                         # Create new recorder for next video
                         video_recorder = video_recorder.get_new_recorder(word)
                         count += 1
-                        if count >= 50:
+                        if count >= 20:
                             cv2.destroyAllWindows()
                             count = 0
                             can_record = False

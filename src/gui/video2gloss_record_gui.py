@@ -1,5 +1,5 @@
 """
-Record Video to Gloss GUI - Simple Version
+Record Video to Gloss GUI
 Record video, then process it using the file processor
 """
 

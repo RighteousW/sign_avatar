@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 import random
 
-from ..constants import GESTURE_MODEL_2_SKIP_METADATA_PATH, LANDMARKS_DIR, OUTPUT_DIR, REPRESENTATIVES_LEFT
+from ..constants import LANDMARKS_DIR_HANDS_ONLY, OUTPUT_DIR, REPRESENTATIVES_MANUAL
 
 
 class GestureRepresentativeSelector:
@@ -184,7 +184,7 @@ class GestureRepresentativeSelector:
         """Get all gesture files organized by gloss with handedness"""
         gesture_files = defaultdict(list)
 
-        for root, dirs, files in os.walk(LANDMARKS_DIR):
+        for root, dirs, files in os.walk(LANDMARKS_DIR_HANDS_ONLY):
             for file in files:
                 if file.endswith("_landmarks.pkl"):
                     file_path = os.path.join(root, file)
@@ -298,62 +298,6 @@ class GestureRepresentativeSelector:
             },
         )
 
-    def create_metadata(
-        self, handedness_filter: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create metadata file with representative gestures"""
-        print("=== Creating Gesture Representatives Metadata ===")
-
-        gesture_files = self.get_gesture_files(handedness_filter)
-        print(f"Found {len(gesture_files)} unique gestures")
-
-        if handedness_filter:
-            print(f"Filtering for {handedness_filter} handedness only")
-
-        representatives = {}
-        handedness_counts = defaultdict(int)
-
-        for gloss, files in gesture_files.items():
-            if files:
-                rep_file, handedness, stats = self.select_representative_file(
-                    files, gloss
-                )
-                representatives[gloss] = {
-                    "file_path": rep_file,
-                    "handedness": handedness,
-                    "stats": stats,
-                    "alternatives": [f for f, h in files if f != rep_file],
-                }
-                handedness_counts[handedness] += 1
-
-        print(f"\nSelected {len(representatives)} representative gestures:")
-        for handedness, count in handedness_counts.items():
-            print(f"  {handedness}: {count} gestures")
-
-        metadata = {
-            "created_at": datetime.now().isoformat(),
-            "handedness_filter": handedness_filter,
-            "total_glosses": len(representatives),
-            "handedness_distribution": dict(handedness_counts),
-            "representatives": representatives,
-        }
-
-        output_dir = Path(OUTPUT_DIR) / "gesture_metadata"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        metadata_file = (
-            output_dir
-            / f"representatives{'_' + handedness_filter if handedness_filter else ''}.json"
-        )
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        print(f"\n=== Metadata Creation Complete ===")
-        print(f"Saved to: {metadata_file}")
-
-        return metadata
-
-
 class GestureTransitionGenerator:
     """Generates transitions on-demand from representative gestures"""
 
@@ -396,31 +340,48 @@ class GestureTransitionGenerator:
         """Extract pose positions from frames"""
         positions = []
         for frame in frames:
-            frame_positions = np.zeros((33, 4))
+            frame_positions = np.zeros((27, 4))
             if "pose" in frame and frame["pose"] and frame["pose"]["landmarks"]:
                 landmarks = np.array(frame["pose"]["landmarks"])
-                if landmarks.shape == (33, 4):
+                if landmarks.shape == (27, 4):
                     frame_positions = landmarks
             positions.append(frame_positions)
         return np.array(positions)
 
     def interpolate_positions(
-        self, start_pos: np.ndarray, end_pos: np.ndarray, num_frames: int
+        self,
+        start_pos: np.ndarray,
+        end_pos: np.ndarray,
+        num_frames: int,
+        easing: bool = True,
     ) -> np.ndarray:
-        """Linear interpolation between positions"""
+        """Linear interpolation between positions with optional easing"""
+
+        # Validate shapes match
+        if start_pos.shape != end_pos.shape:
+            raise ValueError(f"Shape mismatch: {start_pos.shape} vs {end_pos.shape}")
+
         original_shape = start_pos.shape
         start_flat = start_pos.flatten()
         end_flat = end_pos.flatten()
-        weights = np.linspace(0, 1, num_frames)
+
+        # Generate interpolation weights
+        t = np.linspace(0, 1, num_frames)
+
+        # Optional: Apply easing for smoother motion
+        if easing:
+            # Smooth step (ease-in-ease-out)
+            t = t * t * (3.0 - 2.0 * t)
+            # Or cubic easing: t = t * t * t * (t * (t * 6 - 15) + 10)
 
         interpolated = []
-        for weight in weights:
+        for weight in t:
             frame_values = start_flat + weight * (end_flat - start_flat)
             interpolated.append(frame_values)
 
         interpolated = np.array(interpolated)
         return interpolated.reshape((num_frames,) + original_shape)
-
+    
     def positions_to_frames(
         self, hand_positions: np.ndarray, pose_positions: Optional[np.ndarray] = None
     ) -> List[Dict]:
@@ -466,11 +427,22 @@ class GestureTransitionGenerator:
         # Validate all glosses exist
         denied_glosses = []
         allowed_glosses = []
+        gloss_to_key_map = {}  # Track which key to use for each gloss
+
         for gloss in gloss_sequence:
-            if gloss not in self.representatives:
+            rep_key = self._find_representative_key(gloss)
+            if rep_key is None:
                 denied_glosses.append(gloss)
             else:
                 allowed_glosses.append(gloss)
+                gloss_to_key_map[gloss] = rep_key
+
+        # Load all gesture data
+        gesture_data = []
+        for gloss in allowed_glosses:
+            rep_key = gloss_to_key_map[gloss]  # Use mapped key
+            rep_info = self.representatives[rep_key]
+            file_path = rep_info["file_path"]
 
         # Load all gesture data
         gesture_data = []
@@ -572,7 +544,7 @@ class GestureTransitionGenerator:
             "frames": combined_frames,
             "landmark_types": gesture_data[0]["data"].get(
                 "landmark_types", ["hand_landmarks"]
-            ),
+            ) if gesture_data else "None",
             "sequence_metadata": {
                 "gloss_sequence": gloss_sequence,
                 "transition_length": transition_length,
@@ -598,18 +570,34 @@ class GestureTransitionGenerator:
 
         return output_data
 
+    def _find_representative_key(self, gloss: str) -> Optional[str]:
+        """Find the actual representative key for a gloss, handling partial matches"""
+        gloss_lower = gloss.lower()
+        
+        # Try exact match first
+        if gloss_lower in self.representatives:
+            return gloss_lower
+        
+        # Try case variations
+        for key in self.representatives.keys():
+            if key.lower() == gloss_lower:
+                return key
+        
+        # Try partial match - find key that starts with the gloss
+        for key in self.representatives.keys():
+            if key.lower().startswith(gloss_lower):
+                return key
+        
+        # Try finding if gloss is contained in key
+        for key in self.representatives.keys():
+            if gloss_lower in key.lower():
+                return key
+        
+        return None
 
 def main():
     parser = argparse.ArgumentParser(description="Gesture transition system")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
-
-    # Create metadata command
-    create_parser = subparsers.add_parser(
-        "create-metadata", help="Create representatives metadata"
-    )
-    create_parser.add_argument(
-        "--handedness", choices=["left", "right"], help="Filter by handedness"
-    )
 
     # Generate sequence command
     generate_parser = subparsers.add_parser(
@@ -617,7 +605,7 @@ def main():
     )
     generate_parser.add_argument(
         "--metadata",
-        default=REPRESENTATIVES_LEFT,
+        default=REPRESENTATIVES_MANUAL,
         help="Path to metadata file",
     )
     generate_parser.add_argument(
@@ -642,12 +630,7 @@ def main():
     )
 
     args = parser.parse_args()
-
-    if args.command == "create-metadata":
-        selector = GestureRepresentativeSelector()
-        selector.create_metadata(args.handedness)
-
-    elif args.command == "generate":
+    if args.command == "generate":
         generator = GestureTransitionGenerator(args.metadata)
 
         # If no glosses provided, select random ones

@@ -5,11 +5,11 @@ import numpy as np
 from collections import deque
 from typing import List, Optional, Tuple
 
-from ..model_training import GestureRecognizerModel
+from ..model_training import GestureRecognizerCNN
 
 from ..constants import (
-    GESTURE_MODEL_PATH,
-    GESTURE_MODEL_METADATA_PATH,
+    get_gesture_metadata_path,
+    get_gesture_model_path,
 )
 from ..landmark_extraction import LandmarkExtractor
 
@@ -53,7 +53,6 @@ def extract_landmarks_from_frame_data(
         pose = frame_data.get("pose")
         if pose:
             landmarks = pose.get("landmarks", [])
-            # Extract only x, y, z (skip visibility for consistency with model)
             landmarks_xyz = [[lm[0], lm[1], lm[2]] for lm in landmarks]
             landmarks_flat = np.array(landmarks_xyz).flatten()
             pose_features[: min(len(landmarks_flat), len(pose_features))] = (
@@ -73,16 +72,16 @@ class GestureRecognizer:
 
         # Use default paths if not provided
         if model_path is None:
-            model_path = GESTURE_MODEL_PATH
+            model_path = get_gesture_model_path(False, 2)
         if metadata_path is None:
-            metadata_path = GESTURE_MODEL_METADATA_PATH
+            metadata_path = get_gesture_metadata_path(False, 2)
 
         # Load model metadata
         with open(str(metadata_path), "rb") as f:
             self.model_info = pickle.load(f)
 
         # Initialize model
-        self.model = GestureRecognizerModel(
+        self.model = GestureRecognizerCNN(
             input_size=self.model_info["input_size"],
             num_classes=len(self.model_info["class_names"]),
             hidden_size=self.model_info["hidden_size"],
@@ -515,8 +514,8 @@ def main():
     args = parser.parse_args()
 
     gesture_recognizer = GestureRecognizer(
-        model_path=GESTURE_MODEL_PATH,
-        metadata_path=GESTURE_MODEL_METADATA_PATH,
+        model_path=get_gesture_model_path(False, 2),
+        metadata_path=get_gesture_metadata_path(False, 2),
     )
 
     if args.mode == "video":

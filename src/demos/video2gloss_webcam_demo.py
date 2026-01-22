@@ -1,5 +1,5 @@
 """
-Webcam to Gloss GUI
+Webcam to Gloss demo
 Live webcam feed with real-time gloss detection
 """
 
@@ -26,8 +26,6 @@ from PyQt6.QtGui import QImage, QPixmap
 
 try:
     from ..constants import (
-        MEDIAPIPE_HAND_LANDMARKER_PATH,
-        MEDIAPIPE_POSE_LANDMARKER_PATH,
         get_gesture_metadata_path,
         get_gesture_model_path,
     )
@@ -51,8 +49,11 @@ class WebcamProcessor(QObject):
         self.is_processing = False
         self.confidence_threshold = 0.7
 
+        use_pose = False
+        skip_pattern = 2
+
         # Load model
-        with open(str(get_gesture_metadata_path(False, 2)), "rb") as f:
+        with open(str(get_gesture_metadata_path(use_pose, skip_pattern)), "rb") as f:
             self.model_info = pickle.load(f)
 
         self.model = GestureRecognizerCNN(
@@ -63,7 +64,8 @@ class WebcamProcessor(QObject):
         )
 
         checkpoint = torch.load(
-            str(get_gesture_model_path(False, 2)), map_location=self.device
+            str(get_gesture_model_path(use_pose, skip_pattern)),
+            map_location=self.device,
         )
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.model.to(self.device)
@@ -406,7 +408,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 700, 700)
 
         try:
-            from .styles import get_dark_stylesheet
+            from .demo_utils import get_dark_stylesheet
 
             self.setStyleSheet(get_dark_stylesheet())
         except ImportError:
