@@ -1,118 +1,148 @@
 # Sign Language Translation System
 
-A bidirectional sign language translation system with six integrated components enabling translation between spoken language and Namibiam Sign Language (NSL).
+A real-time bidirectional translation system between speech and **Namibian Sign Language (NSL)**, combining speech recognition, computer vision, and avatar-based visualization.
 
-## Overview
+<!-- Going, to add a demo here, currently in progress -->
 
-This honors project implements a complete pipeline for sign language translation, supporting multiple translation directions:
-- **Forward direction**: Speech → Text → Gloss → Visualization
-- **Reverse direction**: Video → Gloss → Text → Speech
+## Key Features
 
-## System Architecture
+* 🎤 **Speech → Sign Translation**: Convert spoken English into sign language visualization
+* 📷 **Sign → Text Recognition**: Real-time sign detection using computer vision
+* 🔁 **Bidirectional Pipeline**: Full loop from speech ↔ text ↔ sign
+* 🖥️ **Unified Interface**: Single desktop app (PyQt6) integrating all components
+* ⚙️ **Modular Design**: Six independent but connected processing stages
 
-### Components
+---
 
-1. **Speech → Text (Audio2Text)**
-   - Real-time audio transcription
-   - Converts spoken English to written text
+## Architecture
 
-2. **Text → Gloss**
-   - Translates English text to NSL gloss notation
-   - Gloss represents the grammatical structure of sign language
+The system is composed of six modular components:
 
-3. **Gloss → Visualization**
-   - Renders sign language glosses as visual representations
-   - Displays signs for user comprehension
+| Component             | Description                          | Status |
+| --------------------- | ------------------------------------ | ------ |
+| Speech → Text         | Real-time speech transcription       | ✅      |
+| Text → Gloss          | English to NSL gloss translation     | ✅      |
+| Gloss → Visualization | Avatar-based sign rendering          | ✅      |
+| Video → Gloss         | Sign recognition via computer vision | ⚠️     |
+| Gloss → Text          | Gloss to English translation         | ⚠️     |
+| Text → Speech         | Speech synthesis                     | ✅      |
 
-4. **Video → Gloss**
-   - Computer vision-based sign recognition from webcam
-   - Real-time detection of signs from video input
-   - **Status**: Achieves 96% accuracy on test data; struggles with temporal segmentation in continuous signing
+### Translation Flow
 
-5. **Gloss → Text**
-   - Converts NSL gloss notation back to English text
-   - **Status**: Trained on synthetic data with constrained vocabulary
+* **Forward**: Speech → Text → Gloss → Visualization
+* **Reverse**: Video → Gloss → Text → Speech
 
-6. **Text → Speech**
-   - Text-to-speech synthesis
-   - Completes the bidirectional translation loop
-
-Note that ```Speech → Text``` and ``Text → Speech`` modules require internet connection to work
+---
 
 ## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/RighteousW/sign_avatar.git
 cd sign_avatar
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
+---
+
 ## Usage
 
-Run the unified demo application:
-
 ```bash
-#install command scripts using setup.py
 pip install -e .
-
 unified-demo
 ```
 
-The application provides a tabbed interface with all six components accessible from a single window.
+This launches a desktop application with:
 
-## Technical Challenges
+* Speech-to-sign translation
+* Sign-to-text recognition
+* Real-time visualization interface
 
-### Video → Gloss
-The primary challenge is **temporal segmentation** in continuous signing:
-- Model performs well on isolated, pre-segmented signs (96% test accuracy)
-- Struggles with continuous signing where sign boundaries are unclear
-- Additional challenges: lighting variations, camera angles, distribution shift
+> ⚠️ Note: Speech-to-text and text-to-speech require an internet connection.
+
+---
+
+## Technical Highlights
+
+* Designed and implemented a **multi-stage ML pipeline** integrating speech, vision, and language components
+* Built a **modular architecture** to allow independent development and testing of each stage
+* Addressed **real-world deployment challenges**, including:
+
+  * Temporal segmentation in continuous signing
+  * Distribution mismatch between pipeline components
+  * Error propagation across stages
+
+---
+
+## Challenges & Limitations
+
+### Video → Gloss (Sign Recognition)
+
+* Achieves **96% accuracy** on isolated test data
+* Struggles with **continuous signing** due to unclear sign boundaries
+* Sensitive to lighting, camera angle, and real-world variability
 
 ### Gloss → Text
-- Trained on synthetic data with clean, well-structured glosses
-- Constrained vocabulary to ensure grammatical correctness
-- Limited generalization to noisy real-world gloss sequences
-- Architecture validated separately using published ASL datasets
 
-### Integration Challenges
-- Data distribution mismatch between independently-trained components
-- Error propagation through the pipeline (noisy video→gloss output affects gloss→text)
-- Highlights the gap between component-level and system-level performance
+* Trained on **synthetic data with constrained vocabulary**
+* Limited generalization to noisy or real-world gloss sequences
 
-## Performance
+### System-Level Challenges
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Speech → Text | ✅ Working | Real-time transcription |
-| Text → Gloss | ✅ Working | Reliable translation |
-| Gloss → Visualization | ✅ Working | Visual rendering functional |
-| Video → Gloss | ⚠️ Limited | 96% test accuracy; deployment challenges |
-| Gloss → Text | ⚠️ Limited | Constrained vocabulary; synthetic training |
-| Text → Speech | ✅ Working | Audio synthesis functional |
+* Mismatch between independently trained components
+* Errors compound across the pipeline (e.g., noisy vision output affects translation quality)
+
+---
 
 ## Future Work
 
-- Improve temporal segmentation for continuous sign recognition e.g. sliding window for inference
-- Expand gloss→text vocabulary and real-world training data
-- Implement better data augmentation for lighting/angle variations
-- Explore attention mechanisms for sign boundary detection
-- Develop unified training approach to reduce distribution mismatch
+* Improve **temporal segmentation** (e.g., sliding window or sequence models)
+* Expand gloss-to-text with real-world datasets
+* Apply **data augmentation** for robustness (lighting, angles, motion)
+* Explore **attention-based models** for better sequence understanding
+* Investigate **end-to-end training** to reduce pipeline mismatch
+
+---
+
+## Tech Stack
+
+* **Languages**: Python
+* **Libraries/Frameworks**: OpenCV, PyQt6, (TensorFlow / PyTorch if applicable)
+* **Tools**: Git, virtual environments
+
+---
+
+## Project Structure
+
+```bash
+sign_avatar/
+├── audio2text/
+├── text2gloss/
+├── gloss2viz/
+├── video2gloss/
+├── gloss2text/
+├── text2speech/
+├── app/
+└── ...
+```
+
+---
 
 ## Requirements
 
-- Python 3.12.3+
-- PyQt6
-- OpenCV
-- [Additional dependencies in requirements.txt]
+* Python 3.12+
+* PyQt6
+* OpenCV
+* See `requirements.txt` for full dependencies
 
+---
 
 ## Acknowledgments
 
-This project was completed as an honors thesis project. Architecture evaluation used published ASL datasets and benchmarks from the sign language processing research community.
+Developed as a final-year project focused on real-world sign language translation challenges.
+Some architectural ideas were informed by existing research and publicly available ASL datasets.
+
+---
 
 ## Author
 
-Righteous Wasambo
+**Righteous Wasambo**
