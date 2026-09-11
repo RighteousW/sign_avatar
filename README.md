@@ -1,3 +1,5 @@
+> **Browser rebuild:** This branch contains the new interface and local API. Start with [the rebuild setup guide](docs/rebuild/README.md). The original project is preserved on `archive/nsl-original`. The documentation below describes the historical implementation.
+
 # Sign Language Translation System
 
 A real-time bidirectional translation system between speech and **Namibian Sign Language (NSL)**, combining speech recognition, computer vision, and avatar-based visualization.
@@ -146,3 +148,4 @@ Some architectural ideas were informed by existing research and publicly availab
 ## Author
 
 **Righteous Wasambo**
+

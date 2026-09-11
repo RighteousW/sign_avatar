@@ -1,0 +1,394 @@
+[
+  {
+    "id": "0",
+    "label": "0",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "1",
+    "label": "1",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "2",
+    "label": "2",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "3",
+    "label": "3",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "4",
+    "label": "4",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "5",
+    "label": "5",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "6",
+    "label": "6",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "7",
+    "label": "7",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "8",
+    "label": "8",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "9",
+    "label": "9",
+    "category": "digit",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_a",
+    "label": "A",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_b",
+    "label": "B",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_c",
+    "label": "C",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_d",
+    "label": "D",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_e",
+    "label": "E",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_f",
+    "label": "F",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_g",
+    "label": "G",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_h",
+    "label": "H",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_i",
+    "label": "I",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_j",
+    "label": "J",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_k",
+    "label": "K",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_l",
+    "label": "L",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_m",
+    "label": "M",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_n",
+    "label": "N",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_o",
+    "label": "O",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_p",
+    "label": "P",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_q",
+    "label": "Q",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_r",
+    "label": "R",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_s",
+    "label": "S",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_t",
+    "label": "T",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_u",
+    "label": "U",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_v",
+    "label": "V",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_w",
+    "label": "W",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_x",
+    "label": "X",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_y",
+    "label": "Y",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alphabet_z",
+    "label": "Z",
+    "category": "letter",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "accident",
+    "label": "Accident",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "after",
+    "label": "After",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "again",
+    "label": "Again",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "ago",
+    "label": "Ago",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "alcohol",
+    "label": "Alcohol",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "also",
+    "label": "Also",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "always",
+    "label": "Always",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "angry",
+    "label": "Angry",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "animal",
+    "label": "Animal",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "banana",
+    "label": "Banana",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "before",
+    "label": "Before",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "begin",
+    "label": "Begin",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  },
+  {
+    "id": "book",
+    "label": "Book",
+    "category": "word",
+    "language": "NSL",
+    "linguistic_review": "not_recorded",
+    "example_available": false
+  }
+]
